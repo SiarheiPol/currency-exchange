@@ -1,0 +1,142 @@
+---
+description: Project rules, architecture and conventions for this codebase
+globs: "**/*"
+alwaysApply: true
+---
+# AI_CONTEXT — Currency Quote Service
+
+> Agent hub. Read this file, then follow links for details.
+> Symlinked as: CLAUDE.md · AGENTS.md · GEMINI.md · .github/copilot-instructions.md
+> Cursor uses `.cursor/rules/project.mdc` (generated) — run `bash scripts/sync-agents.sh` after any edits.
+
+## Rules
+- [Confidentiality](docs/rules/confidentiality.md) — do not mention the company name
+- [Agent sync](docs/rules/agent-sync.md) — how to add rules and skills; when to run the sync script
+
+## Project
+- [Overview & API](docs/project.md)
+- [Architecture](docs/architecture.md)
+
+## Development
+- [Go conventions](docs/conventions.md)
+- [Out of scope](docs/scope.md)
+
+## Skills
+- [Available scripts](docs/skills.md) — reusable operations any agent can run; mandatory sync workflow
+
+
+---
+
+# Project Overview
+
+Go HTTP service providing asynchronous currency exchange rate quotes.
+Full requirements: `Requirements.pdf` at project root.
+
+## API Flow
+
+<!-- To be filled after architecture discussion -->
+
+## Endpoints
+
+<!-- To be filled after architecture discussion -->
+
+## Supported Currencies
+
+<!-- To be filled after architecture discussion -->
+
+---
+
+# Architecture
+
+## Package Layout
+
+<!-- To be filled after architecture discussion -->
+
+## Key Design Decisions
+
+<!-- To be filled after architecture discussion -->
+
+## What to Look At First
+
+<!-- To be filled after architecture discussion -->
+
+---
+
+# Conventions
+
+## Language & Runtime
+
+<!-- To be filled after architecture discussion -->
+
+## Code Style
+
+<!-- To be filled after architecture discussion -->
+
+## Testing
+
+<!-- To be filled after architecture discussion -->
+
+---
+
+# Scope
+
+## In Scope
+
+<!-- To be filled after architecture discussion -->
+
+## Out of Scope
+
+<!-- To be filled after architecture discussion -->
+
+---
+
+# Skills
+
+Skills are shell scripts in `scripts/`. Any agent can run them directly with `bash scripts/<name>.sh`. Claude Code also exposes them as slash commands via `.claude/commands/`.
+
+## MANDATORY: after any docs or skills change
+
+```bash
+bash scripts/sync-agents.sh
+```
+
+This regenerates Cursor's `.cursor/rules/project.mdc` (requires YAML frontmatter — cannot be a symlink) and verifies all other agent symlinks are intact. Skipping this leaves agents out of sync.
+
+## Available scripts
+
+| Script | Slash command | When to run |
+|--------|---------------|-------------|
+| `scripts/sync-agents.sh` | `/sync-agents` | After editing `docs/`, `AI_CONTEXT.md`, or adding a new script |
+
+## Adding a new skill
+
+1. Create `scripts/new-skill.sh` and make it executable (`chmod +x`)
+2. Add a row to the table above in this file
+3. Create `.claude/commands/new-skill.md` with the content: `Run: bash scripts/new-skill.sh`
+4. Run `bash scripts/sync-agents.sh`
+
+---
+
+# Confidentiality
+
+Do not mention the client company name anywhere — not in code, comments, docs, commit messages, or any generated output.
+
+---
+
+# Agent Sync Rules
+
+`AI_CONTEXT.md` is the single source of truth for all agent guidance. All agent entry points read from it — directly or via generated files. **Never create separate per-agent instruction files.**
+
+## Mandatory workflow
+
+**After adding a new rule or convention:**
+1. Add it to `AI_CONTEXT.md` (index) and the relevant `docs/` file
+2. Run `bash scripts/sync-agents.sh`
+
+**After adding a new skill:**
+1. Create `scripts/new-skill.sh` (executable)
+2. Document it in `docs/skills.md`
+3. Create `.claude/commands/new-skill.md` for Claude Code slash command
+4. Run `bash scripts/sync-agents.sh`
+
+Running `sync-agents.sh` is required — it regenerates Cursor's `.mdc` file (which needs YAML frontmatter) and verifies all symlinks. Skipping it leaves agents out of sync.
