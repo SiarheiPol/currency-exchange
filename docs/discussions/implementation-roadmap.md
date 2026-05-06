@@ -17,7 +17,7 @@ This document is updated whenever a discussion doc adds or changes a decision. I
 
 The minimum to have `make check` working on an empty project.
 
-- [ ] `go.mod` with Go 1.22+
+- [ ] `go.mod` with Go 1.24+
 - [ ] `Makefile` with targets: `check`, `test`, `lint`, `generate`, `run`
 - [ ] `.golangci.yml` with default linters (`errcheck`, `govet`, `gofmt`, `staticcheck`, `gosimple`, `unused`, `ineffassign`)
 - [ ] CI pipeline running `make check` on PR (GitHub Actions / GitLab CI)

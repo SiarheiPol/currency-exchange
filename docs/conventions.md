@@ -4,7 +4,7 @@ Mechanical rules of the codebase. Strategic principles (discipline → automatio
 
 ## Language & Runtime
 
-- **Go 1.22+.** Generics, structured logging via `log/slog`, and `context.WithoutCancel` are baseline assumptions.
+- **Go 1.24+.** Generics, structured logging via `log/slog`, and `context.WithoutCancel` are baseline assumptions. The native `tool` directive (introduced in Go 1.24) is used to pin tool dependencies (e.g. `golang-migrate`) directly in `go.mod`; no `tools.go` or build-tag workaround is needed.
 - **Standard library first.** External dependencies are added when stdlib is genuinely insufficient. Approved core dependencies: `pgx/v5`, `prometheus/client_golang`, `oapi-codegen`, `kin-openapi`, `testify`, `testcontainers-go`, `gobreaker` (deferred to Stage 6).
 - **Module path.** TBD at scaffold; conventionally `github.com/<org>/<service-name>`.
 - **No CGO.** All builds produce static binaries.

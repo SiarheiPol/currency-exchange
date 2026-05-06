@@ -21,7 +21,7 @@ Supported currencies (whitelist): `USD`, `EUR`, `MXN`. Configurable via env.
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.24+
 - Docker and Docker Compose (for running the full stack)
 - `make` (Makefile is the entry point for build / test / lint)
 
