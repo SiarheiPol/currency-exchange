@@ -1,2 +1,6 @@
 Requirements.pdf
 .claude/settings.json
+bin/
+*.exe
+coverage.out
+.env

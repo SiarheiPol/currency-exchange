@@ -17,13 +17,13 @@ This document is updated whenever a discussion doc adds or changes a decision. I
 
 The minimum to have `make check` working on an empty project.
 
-- [ ] `go.mod` with Go 1.24+
+- [x] `go.mod` with Go 1.24+
 - [ ] `Makefile` with targets: `check`, `test`, `lint`, `generate`, `run`
 - [ ] `.golangci.yml` with default linters (`errcheck`, `govet`, `gofmt`, `staticcheck`, `gosimple`, `unused`, `ineffassign`)
 - [ ] CI pipeline running `make check` on PR (GitHub Actions / GitLab CI)
 - [ ] Postgres migrations tool integrated (`golang-migrate` or equivalent)
-- [ ] Empty package skeleton: `cmd/`, `internal/`, `api/`
-- [ ] `.env.example` for local config
+- [x] Empty package skeleton: `cmd/`, `internal/`, `api/`
+- [x] `.env.example` for local config
 
 The `forbidigo` rule for `slog.*` is **not** enabled here — there is no `internal/obs` to redirect to yet. It lands in Stage 2.
 
