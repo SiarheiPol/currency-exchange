@@ -7,6 +7,7 @@
 ## Rules
 - [Confidentiality](docs/rules/confidentiality.md) — do not mention the company name
 - [Agent sync](docs/rules/agent-sync.md) — how to add rules and skills; when to run the sync script
+- [Agent development principles](docs/discussions/agent-development.md) — spec-first TDD with AI agents: structural enforcement, honest reporting, reproducibility
 
 ## Project
 - [Overview & API](docs/project.md)

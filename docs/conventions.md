@@ -1,13 +1,107 @@
 # Conventions
 
+Mechanical rules of the codebase. Strategic principles (discipline → automation, honesty, single source of truth) live in `discussions/agent-development.md`.
+
 ## Language & Runtime
 
-<!-- To be filled after architecture discussion -->
+- **Go 1.22+.** Generics, structured logging via `log/slog`, and `context.WithoutCancel` are baseline assumptions.
+- **Standard library first.** External dependencies are added when stdlib is genuinely insufficient. Approved core dependencies: `pgx/v5`, `prometheus/client_golang`, `oapi-codegen`, `kin-openapi`, `testify`, `testcontainers-go`, `gobreaker` (deferred to Stage 6).
+- **Module path.** TBD at scaffold; conventionally `github.com/<org>/<service-name>`.
+- **No CGO.** All builds produce static binaries.
+
+## Project Layout
+
+See `architecture.md` for the full tree. Conventions:
+
+- `cmd/<binary>/main.go` — entry points only, minimal logic.
+- `internal/<package>/` — service-private code; not importable from outside the module.
+- `api/openapi.yaml` — single source of truth for the HTTP contract.
+- `migrations/NNN_*.sql` — Postgres migrations, applied via `golang-migrate` or equivalent.
+- `testdata/` — static fixtures used by tests.
+- Test files live next to source: `foo.go` and `foo_test.go` in the same package, or `package foo_test` for black-box tests.
 
 ## Code Style
 
-<!-- To be filled after architecture discussion -->
+- **`gofmt` / `goimports` mandatory.** Enforced by `golangci-lint` and pre-commit.
+- **Naming follows stdlib.** Short, lowercase, no stuttering (`queue.New`, not `queue.NewQueue`).
+- **Error wrapping with `%w`.** `fmt.Errorf("fetch upstream: %w", err)`. `errors.Is` and `errors.As` work through the chain.
+- **No naked `context.Background()`** in long-running paths. Lint rule blocks it outside tests and `main.go`. See `discussions/resilience.md`.
+- **No log/slog calls outside `internal/obs`.** `forbidigo` rejects them. Use `obs.Logger(ctx)` and the `obs.Ev*` constants. See `discussions/monitoring.md`.
+- **No string literals as metric or log message names.** Constants only, defined in `internal/obs/metrics.go` and `internal/obs/events.go`.
+
+## Linting
+
+`.golangci.yml` enables, at minimum:
+
+- `errcheck`, `govet`, `gofmt`, `staticcheck`, `gosimple`, `unused`, `ineffassign` — baseline (Stage 0).
+- `forbidigo` — for the `slog.*` and `context.Background()` rules (Stage 2).
+- `wrapcheck` — error wrapping discipline (Stage 2).
+
+The full list and timing are in `discussions/implementation-roadmap.md`.
 
 ## Testing
 
-<!-- To be filled after architecture discussion -->
+Strategy detailed in `discussions/testing-strategy.md`. Conventions in brief:
+
+- **TDD by default.** Tests are written first; each PR brings the code that satisfies them.
+- **Test pyramid**: unit (many, fast, fakes for I/O) > integration (real Postgres via `testcontainers`, build tag) > load (k6, deferred).
+- **Fakes over mocks.** Hand-written in-memory implementations of `JobQueue`, `RatesProvider`, `Clock`, `IDGenerator`, etc. No `gomock` / `mockery`.
+- **Schema-per-test isolation** for integration tests against Postgres.
+- **`t.Parallel()` by default**, unless the test mutates a shared resource.
+- **Naming**: `Test<Subject>_<Scenario>`. Example: `TestRefreshHandler_UnsupportedCurrency`. Table-driven tests for variations.
+- **Test fixtures** live in `testdata/` directories or in code, not in external resources.
+
+## Configuration
+
+- All configurable values come from **environment variables**.
+- `.env.example` lists every variable with its purpose, default, and recommended range.
+- Defaults match the dev profile: `docker-compose up` works without manual configuration.
+- The application **fails fast on bad configuration** at startup. No silent defaults for required values.
+
+## Migrations
+
+- SQL files in `migrations/`, numbered sequentially.
+- Up-only by default; down migrations are added when the migration involves data movement that may need rollback.
+- Run as part of service startup or as a separate job, depending on deployment.
+- CI runs migrations against a fresh Postgres in integration tests to catch broken SQL early.
+
+## Build, Test, Lint
+
+`Makefile` provides one entry point: `make check` runs the full quality gate.
+
+```
+make check:
+    go generate ./...
+    git diff --exit-code   # fails if generated files were not committed
+    go test ./...
+    golangci-lint run
+```
+
+CI runs the same `make check`. Other targets:
+
+- `make test` — unit tests only (no integration).
+- `make test-integration` — integration tests with build tag.
+- `make lint` — linters only.
+- `make generate` — codegen only.
+- `make run` — start the service locally against `docker-compose` dependencies.
+- `make loadtest` — k6 baseline scenario (Stage 6).
+
+## Generated Code
+
+- `internal/api/oapi_gen.go` and similar generated files are **committed**.
+- `git diff --exit-code` after `go generate ./...` enforces that generated files match the spec.
+- A `// Code generated by ... DO NOT EDIT.` header is mandatory; `forbidigo` rejects edits to those files.
+
+## Documentation
+
+- Discussion docs in `docs/discussions/` capture the **why** of each architectural decision.
+- Top-level `docs/` files (this one, `architecture.md`, `project.md`, `scope.md`) are **summaries** that point into discussion docs for depth.
+- Go doc comments on exported identifiers are required by `staticcheck` rules.
+- README documents how to run and configure the service; deeper material lives in `docs/`.
+
+## What is **not** in this document
+
+- Strategic principles (discipline → automation, honest reporting, etc.) — `discussions/agent-development.md`.
+- Per-decision rationale (why Postgres queue, why coalescing on `(currency, bucket)`) — discussion docs.
+- Tariff-specific defaults — `discussions/capacity.md`.
+- Operational runbooks — deployment repo when there is one.
