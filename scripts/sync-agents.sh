@@ -33,7 +33,11 @@ FRONTMATTER
     "$ROOT/docs/scope.md" \
     "$ROOT/docs/skills.md" \
     "$ROOT/docs/rules/confidentiality.md" \
-    "$ROOT/docs/rules/agent-sync.md"
+    "$ROOT/docs/rules/agent-sync.md" \
+    "$ROOT/docs/rules/tdd.md" \
+    "$ROOT/docs/rules/roadmap-driven.md" \
+    "$ROOT/docs/rules/orchestration.md" \
+    "$ROOT/docs/agents.md"
   do
     [ -f "$f" ] || continue
     echo ""

@@ -9,6 +9,12 @@
 - [Agent sync](docs/rules/agent-sync.md) — how to add rules and skills; when to run the sync script
 - [Agent development principles](docs/discussions/agent-development.md) — spec-first TDD with AI agents: structural enforcement, honest reporting, reproducibility
 
+## Workflow
+- [TDD](docs/rules/tdd.md) — RED → GREEN → refactor; role separation between test-writer and implementer
+- [Roadmap-driven](docs/rules/roadmap-driven.md) — every iteration ties to one checkbox; plan changes are separate commits
+- [Orchestration](docs/rules/orchestration.md) — the spec-author → test-writer → implementer → reviewer cycle and how to run it in different AI tools
+- [Agent roles](docs/agents.md) — index of role files (`spec-author`, `test-writer`, `implementer`, `reviewer`)
+
 ## Project
 - [Overview & API](docs/project.md)
 - [Architecture](docs/architecture.md)

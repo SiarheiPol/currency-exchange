@@ -14,6 +14,12 @@ alwaysApply: true
 - [Agent sync](docs/rules/agent-sync.md) — how to add rules and skills; when to run the sync script
 - [Agent development principles](docs/discussions/agent-development.md) — spec-first TDD with AI agents: structural enforcement, honest reporting, reproducibility
 
+## Workflow
+- [TDD](docs/rules/tdd.md) — RED → GREEN → refactor; role separation between test-writer and implementer
+- [Roadmap-driven](docs/rules/roadmap-driven.md) — every iteration ties to one checkbox; plan changes are separate commits
+- [Orchestration](docs/rules/orchestration.md) — the spec-author → test-writer → implementer → reviewer cycle and how to run it in different AI tools
+- [Agent roles](docs/agents.md) — index of role files (`spec-author`, `test-writer`, `implementer`, `reviewer`)
+
 ## Project
 - [Overview & API](docs/project.md)
 - [Architecture](docs/architecture.md)
@@ -467,3 +473,215 @@ Do not mention the client company name anywhere — not in code, comments, docs,
 4. Run `bash scripts/sync-agents.sh`
 
 Running `sync-agents.sh` is required — it regenerates Cursor's `.mdc` file (which needs YAML frontmatter) and verifies all symlinks. Skipping it leaves agents out of sync.
+
+---
+
+# TDD
+
+Code in this project is written test-first. The cycle is **RED → GREEN → (refactor)**, and the phases are kept structurally separate so that a test never gets adjusted to match the code that was written for it.
+
+## Phases
+
+### RED — write a failing test
+
+- A test exists and fails for the right reason (asserts the new behaviour, not a typo or missing import).
+- Failure is confirmed by actually running `go test` (or `make test`) against the new test.
+- The verbatim failure output is the artefact that closes this phase. No paraphrasing.
+
+### GREEN — minimal code to pass
+
+- Only enough production code to make the failing test pass. No speculative additions.
+- All previously-green tests stay green; new test moves from RED to PASS.
+- Verbatim `make check` (or `go test ./...`) output is the artefact that closes this phase.
+
+### Refactor — optional
+
+- Tests stay green throughout. If a refactor breaks a test, the refactor is wrong, not the test.
+- Skipped when not needed. Refactoring "just because" is a scope change.
+
+## Hard rules
+
+- **No production code without a failing test.** If a behaviour is worth writing, it is worth pinning with a test first.
+- **Test files and production files are edited in separate phases.** During RED, only test files change. During GREEN, only production files change. Mixed edits in one phase are a process violation — they hide whether the test was actually written first.
+- **The implementer never modifies tests.** If a test needs to change (the contract was wrong), the implementer stops and hands back to the spec-author. See [orchestration.md](orchestration.md).
+- **The test-writer never modifies production code.** If the test cannot be expressed against the current API, the contract from the spec-author is incomplete — surface it, do not paper over with a helper in production code.
+
+## Test scope
+
+- **Unit-level seams are preferred** (`memQueue`, `fakeRatesProvider`, `fakeClock` — see `discussions/testing-strategy.md`). They run fast and keep the RED→GREEN loop tight.
+- **Integration tests** (`-tags integration`, real Postgres via testcontainers) are required when the behaviour lives at the boundary — `pgQueue`, migrations, real upstream client.
+- A behaviour covered by an integration test does not also need a duplicating unit test. Pick the level where the behaviour actually exists.
+
+## What counts as a violation
+
+- Pushing an implementation commit without a corresponding test in the same change set.
+- Modifying both a test and the code-under-test in the same phase to "fix" a failure.
+- Marking a task done while any test is skipped, commented out, or `t.Skip`-gated without an explicit reference to a follow-up roadmap item.
+- Reporting "tests pass" without the verbatim command output. Honest reporting from `discussions/agent-development.md` applies.
+
+## Why this is a rule, not a guideline
+
+`discussions/agent-development.md` requires that discipline be replaced by structure wherever possible. TDD here is enforced through **role separation** (test-writer vs. implementer — see [orchestration.md](orchestration.md)) and through **artefact requirements** (verbatim RED and GREEN output in the handoff). Neither is enforceable by lint, so the cycle is documented here and surfaced in every iteration's handoff.
+
+---
+
+# Roadmap-driven work
+
+Every iteration of work is tied to a concrete checkbox in [implementation-roadmap.md](../discussions/implementation-roadmap.md). The roadmap is the to-do list, the design intent, and the changelog at once — keeping it in sync is non-negotiable.
+
+## Hard rules
+
+- **No code without a roadmap item.** If the change does not correspond to an existing unchecked item, the work cannot start. Either find the matching item, or update the roadmap first (see below).
+- **One checkbox = one commit.** The commit that implements the item also ticks its checkbox in `implementation-roadmap.md`. Reviewer rejects PRs that ship code without flipping the box, or flip a box without the corresponding code.
+- **Plan changes are a separate commit.** Roadmap edits never ride along with code edits. See "Changing the plan" below.
+- **No silent rescoping.** From `discussions/agent-development.md`: if the task as written cannot be completed, surface it and request clarification. Do not invent a substitute item.
+
+## Granularity
+
+A "roadmap item" is one checkbox line. Some lines are too large for a single commit (e.g. "Worker loop skeleton") — in that case the spec-author breaks it into sub-items in the same iteration's contract, and the roadmap line is split into two boxes via a plan-change commit *before* coding starts.
+
+Rule of thumb: if you cannot write the failing test for an item in 30 minutes of focused work, the item is too big. Split it in the roadmap first.
+
+## Changing the plan
+
+The plan changes whenever new information arrives — a discussion doc lands, an upstream constraint is discovered, an item turns out to be misordered. The flow is:
+
+1. **Spec-author switches to plan-update mode.** Produces a diff: which checkbox is added, removed, moved, or rephrased; which discussion doc gets updated to back it.
+2. **User reviews and approves the diff.** Same approval gate as for code.
+3. **Commit, docs only.** Message: `roadmap: <what changed>`. No production code in this commit.
+4. **Iteration restarts** from the spec-author with the updated roadmap as input.
+
+This produces a clean git history where intent always lands before implementation.
+
+## What goes in the commit message
+
+For a code commit closing a roadmap item:
+
+```
+<area>: <what the item delivers>
+
+Closes roadmap item: <Stage N — short item label>
+
+<optional body: non-obvious decisions, links to discussion docs>
+```
+
+For a plan-change commit:
+
+```
+roadmap: <what changed>
+
+<short body: why the change is needed; link to discussion doc if applicable>
+```
+
+## What this rule replaces
+
+Without it, agents drift — they pick up adjacent work, "improve while passing through", or invent items that never get reviewed. The roadmap stops being a plan and becomes a graveyard of partially-done ideas. Tying every commit to one checkbox keeps the document and the code in lockstep.
+
+---
+
+# Orchestration
+
+How a single iteration moves from a roadmap item to a merged commit. Defines the roles, the artefacts each role produces, and how to run the cycle in different AI tools.
+
+## The cycle
+
+```
+roadmap item
+    │
+    ▼
+spec-author ──► contract (what, tests, invariants)        ── user approves
+    │
+    ▼
+test-writer ──► failing tests + verbatim RED output       ── user reviews tests
+    │
+    ▼
+implementer ──► production code, all tests GREEN
+    │
+    ▼
+make check  ──► verbatim PASS output
+    │
+    ▼
+reviewer    ──► report (diff vs. conventions/scope/contract, checkbox check)
+    │
+    ▼
+user approves ──► commit (code + roadmap checkbox in one commit)
+```
+
+Each arrow is a handoff. Each handoff carries a concrete artefact. Skipping an artefact (e.g. "tests pass, trust me, no log attached") breaks the cycle.
+
+## Roles
+
+Full prompts live in [.claude/agents/](../../.claude/agents/). Summary:
+
+| Role | Reads | Writes | Refuses |
+|---|---|---|---|
+| **spec-author** | roadmap, discussion docs, conventions | contract document (chat output) | code, tests |
+| **test-writer** | contract, existing code | test files only | production code |
+| **implementer** | contract, RED output, production code | production code only | tests |
+| **reviewer** | full diff, conventions, scope, roadmap | review report (chat output) | code, tests |
+
+The role separation is the structural enforcement of [tdd.md](tdd.md). A single agent doing two roles defeats the point.
+
+## Running the cycle
+
+### Mode A — Claude Code (native subagents)
+
+The main conversation is the orchestrator. It does not write code itself. It calls each role via the `Task` tool with `subagent_type` matching one of `spec-author`, `test-writer`, `implementer`, `reviewer`. Between handoffs it returns control to the user for approval.
+
+The user types: "next item from Stage N". The orchestrator runs the full cycle, pausing at every approval gate.
+
+### Mode B — Cursor / Copilot / Gemini (single-chat role switching)
+
+No native subagents. The user (or the agent itself, by quoting the role file) explicitly switches roles inside one chat:
+
+> Now act as `test-writer`. Rules: <paste body of `.claude/agents/test-writer.md`>. Contract from previous step: <paste contract>.
+
+Each phase is a clean prompt that includes the role description and the artefact from the previous phase. The role file is the same across tools — only the activation method changes.
+
+### Mode C — Separate sessions (maximum isolation)
+
+Four independent chats, one per role. Handoff artefacts (contract, RED log, code diff, review report) are copied between sessions by the user. Slower, but each role has a clean context window. Use when an iteration is large or sensitive enough that context bleed between roles is a real risk.
+
+## Artefacts and where they live
+
+- **Contract** — in chat. Not committed; it lives in the iteration's transcript. If the contract turns out to deserve preservation, promote it to a `docs/discussions/*.md` entry as a separate plan-change commit (see [roadmap-driven.md](roadmap-driven.md)).
+- **RED output** — verbatim `go test` output, attached in the handoff to the implementer.
+- **GREEN / `make check` output** — verbatim, attached in the handoff to the reviewer and in the final commit message body if non-trivial.
+- **Review report** — in chat. Reviewer states pass / fail per category (conventions, scope, contract, roadmap checkbox) explicitly.
+
+## When the cycle aborts
+
+- **Contract is wrong.** Test-writer or implementer surfaces it, hands back to spec-author. No silent fixes.
+- **`make check` fails.** Implementer fixes it without modifying tests. If the test is wrong, hand back to spec-author for a contract revision.
+- **Reviewer rejects.** Back to whichever role caused the issue (test-writer if test is missing, implementer if convention violation, spec-author if scope creep). Never "fix in review".
+- **User rejects at any approval gate.** Iteration restarts from the affected role. No partial commits.
+
+The only way out is back through the cycle. Shortcuts ("I'll just patch this and re-run") destroy the audit trail and the role separation.
+
+---
+
+# Agent roles
+
+Roles for the TDD iteration cycle defined in [rules/orchestration.md](rules/orchestration.md). Full prompts live in [.claude/agents/](../.claude/agents/) — Claude Code reads them as native subagents; other tools (Cursor, Copilot, Gemini) reuse the body of each file as a role-switch prompt.
+
+## Roles
+
+| Role | File | Reads | Writes | Refuses |
+|---|---|---|---|---|
+| **spec-author** | [.claude/agents/spec-author.md](../.claude/agents/spec-author.md) | roadmap, discussion docs, conventions | contract document (chat output) | code, tests |
+| **test-writer** | [.claude/agents/test-writer.md](../.claude/agents/test-writer.md) | contract, existing code | test files only | production code |
+| **implementer** | [.claude/agents/implementer.md](../.claude/agents/implementer.md) | contract, RED output, production code | production code only | tests |
+| **reviewer** | [.claude/agents/reviewer.md](../.claude/agents/reviewer.md) | full diff, conventions, scope, roadmap | review report (chat output) | code, tests |
+
+## Why role separation
+
+`discussions/agent-development.md` requires that discipline be replaced by structure. Splitting the work across four roles is the structural enforcement of [rules/tdd.md](rules/tdd.md): a single agent doing both `test-writer` and `implementer` will, given enough iterations, adjust a test to make a stubborn implementation pass. Two roles with different tool sets and different prompts cannot — the implementer literally has no instruction to touch test files, and is told to abort and hand back instead.
+
+## Adding or changing a role
+
+1. Edit the role file under `.claude/agents/`.
+2. Update the table above if the role's reads / writes / refusals changed.
+3. If the role pulls in a new rule, add the rule under `docs/rules/` and link from `AI_CONTEXT.md` and from this file.
+4. Run `bash scripts/sync-agents.sh`.
+
+Removing a role is a structural change to the methodology — discuss before doing.
