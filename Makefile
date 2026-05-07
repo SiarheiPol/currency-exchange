@@ -2,11 +2,11 @@
 
 check: generate
 	git diff --exit-code
-	go test ./...
+	go test -race ./...
 	golangci-lint run
 
 test:
-	go test ./...
+	go test -race ./...
 
 lint:
 	golangci-lint run
