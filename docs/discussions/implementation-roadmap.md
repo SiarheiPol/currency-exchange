@@ -36,7 +36,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [ ] Migration: `quote_jobs` table — see `background-mechanism.md`
 - [ ] Migration: `quotes` table — see `background-mechanism.md`
 - [ ] Indexes: `quote_jobs_pending_idx`, `quote_jobs_dedup_key_uidx`
-- [ ] `JobQueue` interface — see `background-mechanism.md`
+- [x] `JobQueue` interface — see `background-mechanism.md`
 - [x] `Clock` and `IDGenerator` interfaces with real + fake implementations — see `testing-strategy.md`
 - [ ] `memQueue` implementation
 - [ ] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
