@@ -42,7 +42,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [ ] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
 - [ ] `pgQueue` implementation (`FOR UPDATE SKIP LOCKED`, lease, cleaner)
 - [ ] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
-- [ ] Backoff math (exponential + jitter, capped at 60s)
+- [x] Backoff math (exponential + jitter, capped at 60s)
 - [ ] Worker loop skeleton (`Reserve` → process placeholder → `Complete`/`Reschedule`/`Fail`)
 
 ---
