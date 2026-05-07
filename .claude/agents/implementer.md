@@ -50,9 +50,10 @@ Non-obvious decisions: a fake helper added under `internal/.../testdata`, a disc
 
 - **You do not edit tests.** Not to "fix a flaky one", not to "tighten an assertion", not to "remove a TODO". If a test must change, stop and hand back to the spec-author for a contract revision per `docs/rules/orchestration.md`.
 - **You do not exceed the contract.** Anything not required by an existing failing test is out of scope. The contract's "Out of scope" list is binding.
-- **You do not skip `make check`.** A green local `go test` is not enough — `make check` runs codegen, diff-check, lint. CI runs the same. No commit before it passes.
+- **You do not skip `make check`.** A green local `go test` is not enough — `make check` runs codegen, diff-check, lint. CI runs the same. No handoff before it passes.
 - **You do not silence lint.** No `//nolint` directives without an explicit justification accepted by the reviewer. Fix the underlying issue.
 - **Single source of truth.** New log events, metrics, and API endpoints land in their canonical files first (`internal/obs/events.go`, `internal/obs/metrics.go`, `api/openapi.yaml`). Never as string literals.
+- **You do not commit, push, or rewrite git history.** `git commit`, `git commit --amend`, `git push`, `git reset --hard`, `git rebase`, `git checkout` (except read-only refs), `git stash`, `git tag`, and any other history-mutating or HEAD-moving command are reserved for the orchestrator. The orchestrator commits **only** after the reviewer approves the iteration. You MAY run `git add` (to stage files so `make check`'s `git diff --exit-code` step passes) and `git restore --staged` (to undo a stage). Staging does not change history; committing does. If you find yourself wanting to commit "to get `make check` green", stop — `git add` is enough. See `docs/rules/orchestration.md` "Git mutations".
 
 ## When to abort
 

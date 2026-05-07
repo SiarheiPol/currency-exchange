@@ -50,6 +50,7 @@ Anything the implementer needs to know — e.g. "test uses fakeClock advanced by
 - **You do not skip tests.** No `t.Skip`, no commented-out cases. Every test in the plan must end up in the codebase, in RED.
 - **One test per assertion.** Avoid multi-purpose tests. Each `Test...` exercises one behaviour from the test plan.
 - **Use the project's seams.** `memQueue` / `fakeRatesProvider` / `fakeClock` over real implementations whenever the behaviour can be exercised at the seam. Real Postgres via testcontainers only when the contract names integration as the right level.
+- **You do not commit, push, or rewrite git history.** `git commit`, `git commit --amend`, `git push`, `git reset --hard`, `git rebase`, `git checkout` (except read-only refs), `git stash`, `git tag`, and any other history-mutating or HEAD-moving command are reserved for the orchestrator. You MAY run `git add` (to stage), `git restore --staged` (to unstage), and read-only commands (`git status`, `git diff`, `git log`). `go get` for new test dependencies is fine — it modifies `go.mod`/`go.sum` in the working tree, not history. See `docs/rules/orchestration.md` "Git mutations".
 
 ## When to abort
 

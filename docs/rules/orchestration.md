@@ -68,6 +68,26 @@ Four independent chats, one per role. Handoff artefacts (contract, RED log, code
 - **GREEN / `make check` output** — verbatim, attached in the handoff to the reviewer and in the final commit message body if non-trivial.
 - **Review report** — in chat. Reviewer states pass / fail per category (conventions, scope, contract, roadmap checkbox) explicitly.
 
+## Git mutations
+
+`git commit`, `git push`, and any history-rewriting or HEAD-moving command are **reserved for the orchestrator**. They run only after the reviewer approves the iteration. No role inside the cycle (`spec-author`, `test-writer`, `implementer`, `reviewer`) commits, pushes, amends, resets, rebases, stashes, or tags.
+
+Reasons:
+
+- **Audit trail.** One commit per approved iteration with the orchestrator's commit message keeps `git log` aligned with the cycle in [roadmap-driven.md](roadmap-driven.md). A role committing mid-cycle hides the contract that drove the change.
+- **Reviewer position.** The reviewer reads the working tree (or staged state). If the implementer commits before review, the reviewer is reading history, not a proposal — and rejection becomes a `git revert` instead of a discard.
+- **Commit message control.** The contract dictates the commit message. A role choosing its own message bypasses the contract.
+
+Permitted git operations inside the cycle:
+
+| Role | Allowed | Forbidden |
+|---|---|---|
+| `test-writer` | `git add`, `git restore --staged`, `git status`, `git diff`, `git log` (read), `go get` (modifies `go.mod`/`go.sum` working tree, not history) | everything that mutates history or moves HEAD |
+| `implementer` | same as above | same |
+| `spec-author`, `reviewer` | read-only git commands | any mutation |
+
+If `make check`'s `git diff --exit-code` step fails because of unstaged tracked-file changes (e.g., `go.mod`/`go.sum` from a `go get` in the RED phase), the right fix is `git add` — not `git commit`. Staging clears the diff for the duration of the verification; the orchestrator commits the staged set after reviewer approval.
+
 ## When the cycle aborts
 
 - **Contract is wrong.** Test-writer or implementer surfaces it, hands back to spec-author. No silent fixes.
