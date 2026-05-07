@@ -20,7 +20,7 @@ The minimum to have `make check` working on an empty project.
 - [x] `go.mod` with Go 1.24+
 - [x] `Makefile` with targets: `check`, `test`, `lint`, `generate`, `run`
 - [x] `.golangci.yml` with default linters (`errcheck`, `govet`, `gofmt`, `staticcheck`, `gosimple`, `unused`, `ineffassign`)
-- [ ] CI pipeline running `make check` on PR (GitHub Actions / GitLab CI)
+- [x] CI pipeline running `make check` on PR (GitHub Actions / GitLab CI)
 - [x] Postgres migrations tool integrated (`golang-migrate` or equivalent)
 - [x] Empty package skeleton: `cmd/`, `internal/`, `api/`
 - [x] `.env.example` for local config

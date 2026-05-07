@@ -26,6 +26,7 @@ The single quality gate. CI runs the same. Any agent or developer commits **only
 | Script | Slash command | When to run |
 |---|---|---|
 | `scripts/sync-agents.sh` | `/sync-agents` | after editing `docs/`, `AI_CONTEXT.md`, or adding a new shell skill |
+| `scripts/using-github.sh` | `/using-github` | inspecting CI run status, PR status, repo metadata; read-only |
 
 ## Review prompts
 
