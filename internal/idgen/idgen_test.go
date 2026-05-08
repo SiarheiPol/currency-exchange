@@ -45,7 +45,7 @@ func TestSeqIDGenerator_FirstIDIsExpected(t *testing.T) {
 	t.Parallel()
 
 	g := NewSeq()
-	require.Equal(t, "id-000001", g.NewID())
+	require.Equal(t, "00000000-0000-0000-0000-000000000001", g.NewID())
 }
 
 // TestSeqIDGenerator_IDsIncrementSequentially confirms monotonic increment with consistent zero-padded format.
@@ -59,7 +59,13 @@ func TestSeqIDGenerator_IDsIncrementSequentially(t *testing.T) {
 		got = append(got, g.NewID())
 	}
 
-	require.Equal(t, []string{"id-000001", "id-000002", "id-000003", "id-000004", "id-000005"}, got)
+	require.Equal(t, []string{
+		"00000000-0000-0000-0000-000000000001",
+		"00000000-0000-0000-0000-000000000002",
+		"00000000-0000-0000-0000-000000000003",
+		"00000000-0000-0000-0000-000000000004",
+		"00000000-0000-0000-0000-000000000005",
+	}, got)
 }
 
 // TestSeqIDGenerator_ConcurrentNewID confirms that SeqIDGenerator is safe for concurrent use.

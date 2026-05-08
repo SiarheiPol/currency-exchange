@@ -26,8 +26,8 @@ func (UUIDGenerator) NewID() string {
 // New returns an IDGenerator backed by UUIDGenerator.
 func New() IDGenerator { return UUIDGenerator{} }
 
-// SeqIDGenerator returns deterministic, sequential IDs of the form "id-NNNNNN".
-// Safe for concurrent use.
+// SeqIDGenerator returns deterministic, sequential IDs in UUID format:
+// "00000000-0000-0000-0000-NNNNNNNNNNNN". Safe for concurrent use.
 type SeqIDGenerator struct {
 	mu      sync.Mutex
 	counter int
@@ -38,10 +38,11 @@ func NewSeq() *SeqIDGenerator {
 	return &SeqIDGenerator{}
 }
 
-// NewID returns the next sequential ID string.
+// NewID returns the next sequential ID string in UUID format
+// "00000000-0000-0000-0000-NNNNNNNNNNNN".
 func (g *SeqIDGenerator) NewID() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.counter++
-	return fmt.Sprintf("id-%06d", g.counter)
+	return fmt.Sprintf("00000000-0000-0000-0000-%012d", g.counter)
 }
