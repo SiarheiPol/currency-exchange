@@ -34,6 +34,12 @@ func newJob(clk clock.Clock, idg idgen.IDGenerator, currency, dedupKey string) q
 	}
 }
 
+// ghostID is a valid UUID-format job ID that is never inserted into any queue
+// during the contract tests. Using a valid UUID prevents backends that store
+// IDs in a UUID column (e.g. pgQueue) from rejecting the value before the
+// NOT-FOUND check can run.
+const ghostID = queue.JobID("00000000-0000-0000-0000-000000000099")
+
 // RunJobQueueContractTests runs the full contract test suite against any
 // queue.JobQueue produced by factory.
 func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
@@ -313,7 +319,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		q := factory(t, clk)
 		ctx := context.Background()
 
-		err := q.Complete(ctx, "nonexistent-id")
+		err := q.Complete(ctx, ghostID)
 		assert.True(t, errors.Is(err, queue.ErrNotFound))
 	})
 
@@ -389,7 +395,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		q := factory(t, clk)
 		ctx := context.Background()
 
-		err := q.Reschedule(ctx, "nonexistent", "r", 5*time.Second)
+		err := q.Reschedule(ctx, ghostID, "r", 5*time.Second)
 		assert.True(t, errors.Is(err, queue.ErrNotFound))
 	})
 
@@ -438,7 +444,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		q := factory(t, clk)
 		ctx := context.Background()
 
-		err := q.Fail(ctx, "nonexistent", "r")
+		err := q.Fail(ctx, ghostID, "r")
 		assert.True(t, errors.Is(err, queue.ErrNotFound))
 	})
 
@@ -465,15 +471,13 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		q := factory(t, clk)
 		ctx := context.Background()
 
-		fabricated := queue.JobID("does-not-exist")
-
-		err := q.Complete(ctx, fabricated)
+		err := q.Complete(ctx, ghostID)
 		assert.True(t, errors.Is(err, queue.ErrNotFound), "Complete: want ErrNotFound, got %v", err)
 
-		err = q.Reschedule(ctx, fabricated, "r", 5*time.Second)
+		err = q.Reschedule(ctx, ghostID, "r", 5*time.Second)
 		assert.True(t, errors.Is(err, queue.ErrNotFound), "Reschedule: want ErrNotFound, got %v", err)
 
-		err = q.Fail(ctx, fabricated, "r")
+		err = q.Fail(ctx, ghostID, "r")
 		assert.True(t, errors.Is(err, queue.ErrNotFound), "Fail: want ErrNotFound, got %v", err)
 	})
 

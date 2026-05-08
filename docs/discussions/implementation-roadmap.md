@@ -41,7 +41,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [x] `memQueue` implementation
 - [x] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
 - [x] `pgQueue.Enqueue` (`INSERT ON CONFLICT`, dedup)
-- [ ] `pgQueue.Reserve` + `Complete` + `Reschedule` + `Fail` (`FOR UPDATE SKIP LOCKED`, lease)
+- [x] `pgQueue.Reserve` + `Complete` + `Reschedule` + `Fail` (`FOR UPDATE SKIP LOCKED`, lease)
 - [ ] `pgQueue` cleaner (lease expiry recovery)
 - [x] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
 - [x] Backoff math (exponential + jitter, capped at 60s)
