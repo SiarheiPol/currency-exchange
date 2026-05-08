@@ -39,7 +39,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [x] `JobQueue` interface — see `background-mechanism.md`
 - [x] `Clock` and `IDGenerator` interfaces with real + fake implementations — see `testing-strategy.md`
 - [x] `memQueue` implementation
-- [ ] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
+- [x] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
 - [ ] `pgQueue` implementation (`FOR UPDATE SKIP LOCKED`, lease, cleaner)
 - [ ] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
 - [x] Backoff math (exponential + jitter, capped at 60s)
