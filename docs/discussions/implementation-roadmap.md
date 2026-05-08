@@ -33,15 +33,15 @@ The `forbidigo` rule for `slog.*` is **not** enabled here — there is no `inter
 
 Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 
-- [ ] Migration: `quote_jobs` table — see `background-mechanism.md`
-- [ ] Migration: `quotes` table — see `background-mechanism.md`
-- [ ] Indexes: `quote_jobs_pending_idx`, `quote_jobs_dedup_key_uidx`
+- [x] Migration: `quote_jobs` table — see `background-mechanism.md`
+- [x] Migration: `quotes` table — see `background-mechanism.md`
+- [x] Indexes: `quote_jobs_pending_idx`, `quote_jobs_dedup_key_uidx`
 - [x] `JobQueue` interface — see `background-mechanism.md`
 - [x] `Clock` and `IDGenerator` interfaces with real + fake implementations — see `testing-strategy.md`
 - [x] `memQueue` implementation
 - [x] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
 - [ ] `pgQueue` implementation (`FOR UPDATE SKIP LOCKED`, lease, cleaner)
-- [ ] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
+- [x] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
 - [x] Backoff math (exponential + jitter, capped at 60s)
 - [ ] Worker loop skeleton (`Reserve` → process placeholder → `Complete`/`Reschedule`/`Fail`)
 

@@ -8,6 +8,9 @@ check: generate
 test:
 	go test -race ./...
 
+test-integration:
+	go test -race -tags integration ./...
+
 lint:
 	golangci-lint run
 
