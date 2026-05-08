@@ -40,7 +40,9 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [x] `Clock` and `IDGenerator` interfaces with real + fake implementations — see `testing-strategy.md`
 - [x] `memQueue` implementation
 - [x] `JobQueue` contract test suite (runs against `memQueue` first, will rerun against `pgQueue`)
-- [ ] `pgQueue` implementation (`FOR UPDATE SKIP LOCKED`, lease, cleaner)
+- [ ] `pgQueue.Enqueue` (`INSERT ON CONFLICT`, dedup)
+- [ ] `pgQueue.Reserve` + `Complete` + `Reschedule` + `Fail` (`FOR UPDATE SKIP LOCKED`, lease)
+- [ ] `pgQueue` cleaner (lease expiry recovery)
 - [x] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
 - [x] Backoff math (exponential + jitter, capped at 60s)
 - [ ] Worker loop skeleton (`Reserve` → process placeholder → `Complete`/`Reschedule`/`Fail`)
