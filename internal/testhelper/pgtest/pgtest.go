@@ -19,6 +19,8 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -147,7 +149,22 @@ func NewDB(t *testing.T) *pgxpool.Pool {
 	}
 
 	// Create the pool that tests will use.
-	pool, err := pgxpool.New(ctx, schemaConnStr)
+	// Configure the TimestamptzCodec to scan timestamps as UTC so that
+	// time.Time values returned from TIMESTAMPTZ columns are always UTC,
+	// regardless of the server or host locale.
+	poolCfg, err := pgxpool.ParseConfig(schemaConnStr)
+	if err != nil {
+		t.Fatalf("pgtest: parse pool config: %v", err)
+	}
+	poolCfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		conn.TypeMap().RegisterType(&pgtype.Type{
+			Name:  "timestamptz",
+			OID:   pgtype.TimestamptzOID,
+			Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC},
+		})
+		return nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		t.Fatalf("pgtest: create test pool: %v", err)
 	}
