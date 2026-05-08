@@ -20,7 +20,7 @@ const (
 // The full-jitter strategy spreads concurrent retries across the window to
 // prevent thundering-herd stampedes against a recovering upstream. Negative
 // attempt values are clamped to zero.
-func Compute(attempt int, rng *rand.Rand) time.Duration {
+func Compute(attempt int) time.Duration {
 	if attempt < 0 {
 		attempt = 0
 	}
@@ -32,5 +32,5 @@ func Compute(attempt int, rng *rand.Rand) time.Duration {
 		window = baseDelay << attempt
 	}
 
-	return time.Duration(rng.Int64N(int64(window)))
+	return time.Duration(rand.Int64N(int64(window)))
 }

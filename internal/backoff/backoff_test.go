@@ -1,7 +1,6 @@
 package backoff
 
 import (
-	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -12,9 +11,8 @@ import (
 func TestCompute_Attempt0WindowIsBaseDelay(t *testing.T) {
 	t.Parallel()
 
-	rng := rand.New(rand.NewPCG(1, 2))
 	for i := 0; i < 100; i++ {
-		d := Compute(0, rng)
+		d := Compute(0)
 		require.True(t, d >= 0 && d < time.Second, "got %v", d)
 	}
 }
@@ -37,9 +35,8 @@ func TestCompute_AttemptExpandsWindowExponentially(t *testing.T) {
 
 	for _, tc := range cases {
 		tc := tc
-		rng := rand.New(rand.NewPCG(uint64(tc.attempt), 0))
 		for i := 0; i < 100; i++ {
-			d := Compute(tc.attempt, rng)
+			d := Compute(tc.attempt)
 			require.True(t, d >= 0 && d < tc.expectedUpperBound,
 				"attempt=%d: got %v, want in [0, %v)", tc.attempt, d, tc.expectedUpperBound)
 		}
@@ -53,9 +50,8 @@ func TestCompute_CapEnforcedAtAndAboveSaturation(t *testing.T) {
 
 	for _, attempt := range []int{6, 10, 30} {
 		attempt := attempt
-		rng := rand.New(rand.NewPCG(uint64(attempt), 7))
 		for i := 0; i < 100; i++ {
-			d := Compute(attempt, rng)
+			d := Compute(attempt)
 			require.True(t, d >= 0 && d < 60*time.Second,
 				"attempt=%d: got %v, want in [0, 60s)", attempt, d)
 		}
@@ -67,48 +63,24 @@ func TestCompute_CapEnforcedAtAndAboveSaturation(t *testing.T) {
 func TestCompute_NegativeAttemptTreatedAsZero(t *testing.T) {
 	t.Parallel()
 
-	rng := rand.New(rand.NewPCG(3, 3))
 	for _, attempt := range []int{-1, -100} {
 		for i := 0; i < 50; i++ {
-			d := Compute(attempt, rng)
+			d := Compute(attempt)
 			require.True(t, d >= 0 && d < time.Second,
 				"attempt=%d: got %v, want in [0, 1s)", attempt, d)
 		}
 	}
 }
 
-// TestCompute_DeterministicWithFixedSeed confirms the function is purely a consumer
-// of the injected rng — two identical seeds produce identical sequences.
-func TestCompute_DeterministicWithFixedSeed(t *testing.T) {
-	t.Parallel()
-
-	rng1 := rand.New(rand.NewPCG(42, 99))
-	rng2 := rand.New(rand.NewPCG(42, 99))
-
-	attempts := []int{0, 1, 3, 6, 10}
-	results1 := make([]time.Duration, len(attempts))
-	results2 := make([]time.Duration, len(attempts))
-
-	for i, attempt := range attempts {
-		results1[i] = Compute(attempt, rng1)
-	}
-	for i, attempt := range attempts {
-		results2[i] = Compute(attempt, rng2)
-	}
-
-	require.Equal(t, results1, results2)
-}
-
 // TestCompute_FullJitterDistributionIsUniform confirms that jitter spreads results
-// uniformly across the window. Loose bound avoids RNG-version flakiness.
+// uniformly across the window. Loose bound avoids RNG flakiness.
 func TestCompute_FullJitterDistributionIsUniform(t *testing.T) {
 	t.Parallel()
 
-	rng := rand.New(rand.NewPCG(7, 13))
 	var total int64
 	const n = 1000
 	for i := 0; i < n; i++ {
-		d := Compute(5, rng)
+		d := Compute(5)
 		total += int64(d)
 	}
 	mean := time.Duration(total / n)
