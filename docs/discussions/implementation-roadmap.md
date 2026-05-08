@@ -54,7 +54,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 Logging, metrics, health endpoints. Lands before HTTP handlers because handlers will use `obs.Logger(ctx)` from day one.
 
 - [x] `internal/obs/log.go` — `Logger(ctx) *slog.Logger`
-- [ ] `internal/obs/events.go` — `Ev*` message constants — see `monitoring.md`
+- [x] `internal/obs/events.go` — `Ev*` message constants — see `monitoring.md`
 - [ ] `internal/obs/helpers.go` — typed helper functions (`LogJobCompleted`, etc.)
 - [ ] `internal/obs/metrics.go` — Prometheus metric constants and registrations
 - [ ] `request_id` propagation middleware (read header → context → outbound + echo)
