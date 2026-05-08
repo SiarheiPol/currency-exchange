@@ -35,6 +35,9 @@ type record struct {
 	leaseUntil time.Time
 }
 
+var _ queue.JobQueue = (*Queue)(nil)
+var _ queue.Cleaner = (*Queue)(nil)
+
 // New returns a Queue using the given clock for time decisions.
 func New(c clock.Clock) *Queue {
 	return &Queue{
@@ -140,7 +143,7 @@ func (q *Queue) Reschedule(_ context.Context, id queue.JobID, _ string, after ti
 
 // RecoverExpired resets statusRunning records with an expired lease back to
 // statusPending. Returns the count of recovered records.
-func (q *Queue) RecoverExpired() int {
+func (q *Queue) RecoverExpired(_ context.Context) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -153,7 +156,7 @@ func (q *Queue) RecoverExpired() int {
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
 // Fail marks the job permanently failed. Returns ErrNotFound or ErrNotReserved

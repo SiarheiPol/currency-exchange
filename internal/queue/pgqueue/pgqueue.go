@@ -26,6 +26,7 @@ func New(pool *pgxpool.Pool, clk clock.Clock) *Queue {
 }
 
 var _ queue.JobQueue = (*Queue)(nil)
+var _ queue.Cleaner = (*Queue)(nil)
 
 // Enqueue inserts j or, if a job with the same DedupKey already exists,
 // returns its id with inserted=false.

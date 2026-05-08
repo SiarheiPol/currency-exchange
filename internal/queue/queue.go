@@ -62,6 +62,11 @@ type JobQueue interface {
 	Fail(ctx context.Context, id JobID, reason string) error
 }
 
+// Cleaner recovers jobs whose lease has expired.
+type Cleaner interface {
+	RecoverExpired(ctx context.Context) (int, error)
+}
+
 // ErrNotFound is returned by Complete, Reschedule, and Fail when the target
 // job does not exist. Callers test with errors.Is(err, queue.ErrNotFound).
 var ErrNotFound = errors.New("job not found")
