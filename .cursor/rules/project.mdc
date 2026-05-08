@@ -650,6 +650,50 @@ Four independent chats, one per role. Handoff artefacts (contract, RED log, code
 - **GREEN / `make check` output** — verbatim, attached in the handoff to the reviewer and in the final commit message body if non-trivial.
 - **Review report** — in chat. Reviewer states pass / fail per category (conventions, scope, contract, roadmap checkbox) explicitly.
 
+## Mandatory user gates
+
+The orchestrator MUST stop and wait for explicit user approval at three points in every iteration. Skipping a gate is a process violation, even if the work would otherwise be correct.
+
+### Gate 1 — after spec-author (contract approval)
+
+The orchestrator presents:
+- The full contract (or a structured summary with all decisions called out).
+- The proposed commit message.
+- Open questions that the spec-author resolved, so the user sees the trade-offs that were taken.
+
+The orchestrator waits for an explicit user response (`да`, `yes`, `approve`, etc.) before invoking the test-writer. If the user rejects, the iteration goes back to the spec-author.
+
+### Gate 2 — after test-writer (RED review)
+
+The orchestrator presents:
+- The list of test names with a one-line summary of each.
+- The verbatim RED output (or the relevant excerpt).
+- The path to the new test file(s) and `git status --porcelain`.
+
+The orchestrator waits for an explicit user response before invoking the implementer. The user reads the tests at this gate; once the implementer starts, the test contract is locked.
+
+### Gate 3 — after reviewer (commit approval)
+
+The orchestrator presents:
+- The reviewer's verdict (APPROVED / REJECTED).
+- `git status --porcelain` showing exactly what is staged.
+- The proposed commit message.
+- Any non-blocking observations the reviewer surfaced.
+
+The orchestrator waits for an explicit user response before running `git commit`. Push typically follows commit on the same approval; an additional gate before push is unnecessary unless the user requests it.
+
+### When the test-writer phase is skipped
+
+For type-only or scaffolding commits where no tests are written (precedent: Stage 0 commits, Stage 1 A3), the cycle shortens to spec-author → implementer → reviewer. Gate 2 is omitted. Gates 1 and 3 still apply.
+
+### Why these gates exist
+
+- **Audit trail** — every commit in `git log` corresponds to an explicit user approval, not an autonomous decision by the orchestrator.
+- **Sanity catch** — the user catches process drift (e.g., implementer auto-committing, test-writer leaving formatting issues) before it propagates.
+- **Iteration restart cost is finite** — rejecting at gate 1 costs the contract; rejecting at gate 2 costs the contract + RED phase; rejecting at gate 3 costs the full cycle. Earlier gates exist to catch problems earlier.
+
+The user can waive a gate explicitly for a specific iteration ("just commit, don't ask again for this commit"). The waiver does not carry over — the next iteration starts with all gates active again.
+
 ## Git mutations
 
 `git commit`, `git push`, and any history-rewriting or HEAD-moving command are **reserved for the orchestrator**. They run only after the reviewer approves the iteration. No role inside the cycle (`spec-author`, `test-writer`, `implementer`, `reviewer`) commits, pushes, amends, resets, rebases, stashes, or tags.

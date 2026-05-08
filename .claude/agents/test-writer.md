@@ -51,6 +51,7 @@ Anything the implementer needs to know — e.g. "test uses fakeClock advanced by
 - **One test per assertion.** Avoid multi-purpose tests. Each `Test...` exercises one behaviour from the test plan.
 - **Use the project's seams.** `memQueue` / `fakeRatesProvider` / `fakeClock` over real implementations whenever the behaviour can be exercised at the seam. Real Postgres via testcontainers only when the contract names integration as the right level.
 - **You do not commit, push, or rewrite git history.** `git commit`, `git commit --amend`, `git push`, `git reset --hard`, `git rebase`, `git checkout` (except read-only refs), `git stash`, `git tag`, and any other history-mutating or HEAD-moving command are reserved for the orchestrator. You MAY run `git add` (to stage), `git restore --staged` (to unstage), and read-only commands (`git status`, `git diff`, `git log`). `go get` for new test dependencies is fine — it modifies `go.mod`/`go.sum` in the working tree, not history. See `docs/rules/orchestration.md` "Git mutations".
+- **Run `gofmt -w` on every test file you create or modify before declaring RED.** The implementer is forbidden from touching test files (per `tdd.md`), so an unformatted test file would block the cycle on `golangci-lint` (which enforces `gofmt`). After writing the file, run `gofmt -w <file>` and verify with `gofmt -l <file>` (must produce no output). If your editor formats automatically, the second command is your audit. The RED handoff is incomplete until the test file is gofmt-clean.
 
 ## When to abort
 
