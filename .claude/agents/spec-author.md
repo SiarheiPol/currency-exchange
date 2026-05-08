@@ -36,6 +36,8 @@ Bullet list. Each bullet describes one failing test that the test-writer will wr
 - the expected observable outcome
 Tests are listed in the order the test-writer should write them.
 
+Before listing a test, apply the ROI filter from `docs/rules/tdd.md` § "Test ROI": only include tests that pin **logic** (conditional behaviour, state transitions, error paths, non-obvious transformations). Omit tests that merely mirror the implementation's structure (constant values, field names as string literals, trivial getters). If the contract would produce only structural-mirror tests, say so explicitly and list zero tests — forcing the checkpoint rather than generating noise.
+
 ### Out of scope for this iteration
 Bullet list. Anything the implementer might be tempted to add that belongs to a later roadmap item. Reference the future item if there is one.
 

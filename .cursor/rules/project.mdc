@@ -513,6 +513,24 @@ Code in this project is written test-first. The cycle is **RED → GREEN → (re
 - **Integration tests** (`-tags integration`, real Postgres via testcontainers) are required when the behaviour lives at the boundary — `pgQueue`, migrations, real upstream client.
 - A behaviour covered by an integration test does not also need a duplicating unit test. Pick the level where the behaviour actually exists.
 
+## Test ROI — when not to write a test
+
+A test earns its place by catching realistic regressions that the **compiler, type system, and code review would miss**. Before writing a test, ask: *if I deleted this test, could a real bug slip through undetected?*
+
+Skip a test when it only mirrors the implementation's structure:
+- Asserting that a constant equals the string literal written right next to it.
+- Asserting that a field name or function parameter matches a string literal in the implementation.
+- Asserting behaviour that is trivially derived from the type signature (e.g. a getter returns what was passed to a constructor with no transformation).
+
+Write a test when it pins **logic**:
+- Conditional behaviour (`err != nil` → different level/output).
+- State transitions (job moves from pending → running → done).
+- Error paths and fallbacks (nil context value → falls back to default).
+- Non-obvious transformations (duration → milliseconds, dedup key derivation).
+- Concurrency invariants (only one inserter wins the dedup race).
+
+The spec-author must apply this filter when designing the test plan. The test-writer must apply it before writing each case.
+
 ## What counts as a violation
 
 - Pushing an implementation commit without a corresponding test in the same change set.
