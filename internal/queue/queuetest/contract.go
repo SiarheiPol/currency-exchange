@@ -521,6 +521,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		type result struct {
 			id       queue.JobID
 			inserted bool
+			err      error
 		}
 
 		var (
@@ -537,11 +538,8 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			go func(j queue.Job) {
 				defer wg.Done()
 				id, inserted, err := q.Enqueue(ctx, j)
-				if err != nil {
-					return
-				}
 				mu.Lock()
-				results = append(results, result{id: id, inserted: inserted})
+				results = append(results, result{id: id, inserted: inserted, err: err})
 				mu.Unlock()
 			}(job)
 		}
@@ -549,6 +547,9 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		wg.Wait()
 
 		require.Len(t, results, 100)
+		for _, r := range results {
+			assert.NoError(t, r.err, "Enqueue must not return an error")
+		}
 
 		insertedCount := 0
 		var winnerID queue.JobID
