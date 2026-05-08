@@ -65,3 +65,8 @@ type JobQueue interface {
 // ErrNotFound is returned by Complete, Reschedule, and Fail when the target
 // job does not exist. Callers test with errors.Is(err, queue.ErrNotFound).
 var ErrNotFound = errors.New("job not found")
+
+// ErrNotReserved is returned by Complete, Reschedule, and Fail when the job
+// exists but is not currently in the running state (e.g., pending, done, or
+// failed). Callers test with errors.Is(err, queue.ErrNotReserved).
+var ErrNotReserved = errors.New("job not in running state")
