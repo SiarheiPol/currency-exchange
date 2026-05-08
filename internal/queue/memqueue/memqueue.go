@@ -67,7 +67,7 @@ func (q *Queue) Enqueue(_ context.Context, j queue.Job) (queue.JobID, bool, erro
 }
 
 // Reserve marks up to n pending jobs as running with the given lease duration
-// and returns value-copies of them. Expired running jobs are auto-recovered.
+// and returns value-copies of them.
 func (q *Queue) Reserve(_ context.Context, n int, lease time.Duration) ([]queue.Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -76,12 +76,7 @@ func (q *Queue) Reserve(_ context.Context, n int, lease time.Duration) ([]queue.
 
 	var eligible []*record
 	for _, r := range q.jobs {
-		switch {
-		case r.status == statusPending:
-			// eligible if NextRunAt <= now
-		case r.status == statusRunning && r.leaseUntil.Before(now):
-			// auto-recovery for expired lease
-		default:
+		if r.status != statusPending {
 			continue
 		}
 		if r.job.NextRunAt.Compare(now) <= 0 {
@@ -141,6 +136,24 @@ func (q *Queue) Reschedule(_ context.Context, id queue.JobID, _ string, after ti
 	r.job.Attempts++
 	r.leaseUntil = time.Time{}
 	return nil
+}
+
+// RecoverExpired resets statusRunning records with an expired lease back to
+// statusPending. Returns the count of recovered records.
+func (q *Queue) RecoverExpired() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	now := q.clock.Now()
+	count := 0
+	for _, r := range q.jobs {
+		if r.status == statusRunning && r.leaseUntil.Before(now) {
+			r.status = statusPending
+			r.leaseUntil = time.Time{}
+			count++
+		}
+	}
+	return count
 }
 
 // Fail marks the job permanently failed. Returns ErrNotFound or ErrNotReserved
