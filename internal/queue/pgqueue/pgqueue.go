@@ -185,6 +185,26 @@ func (q *Queue) Fail(ctx context.Context, id queue.JobID, reason string) error {
 	return q.probeNotFoundOrNotReserved(ctx, id, "pgqueue fail")
 }
 
+// RecoverExpired resets running jobs whose lease has expired back to pending.
+// It returns the number of rows updated.
+func (q *Queue) RecoverExpired(ctx context.Context) (int, error) {
+	now := q.clk.Now()
+	tag, err := q.pool.Exec(ctx, `
+		UPDATE quote_jobs
+		   SET status      = 'pending',
+		       lease_until = NULL,
+		       locked_by   = NULL,
+		       updated_at  = $1
+		 WHERE status = 'running'
+		   AND lease_until < $1`,
+		now,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("pgqueue recover expired: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (q *Queue) probeNotFoundOrNotReserved(ctx context.Context, id queue.JobID, op string) error {
 	var exists bool
 	err := q.pool.QueryRow(ctx,
