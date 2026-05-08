@@ -45,7 +45,7 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 - [x] `pgQueue` cleaner (lease expiry recovery)
 - [x] Schema-per-test isolation helper for integration tests — see `testing-strategy.md`
 - [x] Backoff math (exponential + jitter, capped at 60s)
-- [ ] Worker loop skeleton (`Reserve` → process placeholder → `Complete`/`Reschedule`/`Fail`)
+- [x] Worker loop skeleton (`Reserve` → process placeholder → `Complete`/`Reschedule`/`Fail`)
 
 ---
 
