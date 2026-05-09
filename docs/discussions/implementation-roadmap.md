@@ -75,7 +75,7 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 
 Refresh-path code, scheduler, real upstream client.
 
-- [ ] `RatesProvider` interface (`FetchBatch` only) — see `background-mechanism.md`
+- [x] `RatesProvider` interface (`FetchBatch` only) — see `background-mechanism.md`
 - [ ] `fakeRatesProvider` for tests (configurable map + error injection)
 - [ ] `exchangerateHostProvider` (real implementation; `httptest`-based unit tests)
 - [ ] Worker loop calling `FetchBatch` and upserting `quotes` in one transaction
