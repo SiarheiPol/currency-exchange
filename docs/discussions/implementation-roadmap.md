@@ -60,7 +60,7 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 - [x] `request_id` propagation middleware — inbound + echo (outbound deferred to Stage 3)
 - [x] **Enable `forbidigo` rule** in `.golangci.yml`: forbid `slog.(Debug|Info|Warn|Error)` outside `internal/obs/`
 - [x] Prometheus `/metrics` endpoint via `prometheus/client_golang`
-- [ ] `/healthz` (always 200)
+- [x] `/healthz` (always 200)
 - [ ] `/readyz` with DB ping + scheduler-staleness check + worker heartbeat
 - [ ] Retrofit `pgQueue`, `memQueue`, contract tests with logger and metrics
 
