@@ -407,6 +407,7 @@ The single quality gate. CI runs the same. Any agent or developer commits **only
 |---|---|---|
 | `scripts/sync-agents.sh` | `/sync-agents` | after editing `docs/`, `AI_CONTEXT.md`, or adding a new shell skill |
 | `scripts/using-github.sh` | `/using-github` | inspecting CI run status, PR status, repo metadata; read-only |
+| `scripts/dev-run.sh` | — | dev-only: source `.env`, build, exec the server. Mirrors what Docker / k8s do in production; the binary itself stays 12-factor and does not read `.env` |
 
 ## Review prompts
 
@@ -428,7 +429,8 @@ Review files land in `docs/reviews/<date>-<model>-<type>.md`. See `docs/reviews/
 | `make test-integration` | unit + integration tests (`-tags integration`, brings up testcontainers) | before `make check`, or when changing pgQueue / migrations |
 | `make lint` | `golangci-lint run` | when iterating on lint issues alone |
 | `make generate` | `go generate ./...` (regenerates `oapi_gen.go` and similar) | after editing `api/openapi.yaml` |
-| `make run` | start the service locally; assumes `docker compose up` already brought up dependencies | local manual testing |
+| `make build` | `go build -o bin/server ./cmd/server` — produces a release binary in `bin/` (gitignored) | when you want a built artifact (smoke testing, profiling) |
+| `make run` | `go run ./cmd/server` — assumes env vars are already exported (use `scripts/dev-run.sh` to source `.env` first) | local manual testing |
 | `make loadtest` | run k6 baseline scenario against the local stack (Stage 6) | when validating capacity changes |
 | `make loadtest-burst` | k6 refresh-burst scenario (Stage 6) | stress-testing the queue |
 | `make loadtest-fail` | k6 failure-injection scenario via fake provider (Stage 6) | validating retry / circuit logic |
