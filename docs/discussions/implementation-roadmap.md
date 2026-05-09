@@ -62,6 +62,10 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 - [x] Prometheus `/metrics` endpoint via `prometheus/client_golang`
 - [x] `/healthz` (always 200)
 - [ ] `/readyz` with DB ping + scheduler-staleness check + worker heartbeat
+  - [x] handler skeleton + `Checker` interface + body envelope
+  - [x] `PostgresChecker` (hard, via `Ping(ctx)`)
+  - [x] `WorkerChecker` (soft, via `Worker.LastIteration` heartbeat)
+  - [ ] `SchedulerChecker` — deferred to Stage 3 alongside the scheduler component itself
 - [ ] Retrofit `pgQueue`, `memQueue`, contract tests with logger and metrics
 
 ---
