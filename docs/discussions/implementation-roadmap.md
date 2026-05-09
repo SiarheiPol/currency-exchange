@@ -58,7 +58,7 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 - [x] `internal/obs/helpers.go` — typed helper functions (`LogJobCompleted`, etc.)
 - [x] `internal/obs/metrics.go` — Prometheus metric constants and registrations
 - [x] `request_id` propagation middleware — inbound + echo (outbound deferred to Stage 3)
-- [ ] **Enable `forbidigo` rule** in `.golangci.yml`: forbid `slog.(Debug|Info|Warn|Error)` outside `internal/obs/`
+- [x] **Enable `forbidigo` rule** in `.golangci.yml`: forbid `slog.(Debug|Info|Warn|Error)` outside `internal/obs/`
 - [ ] Prometheus `/metrics` endpoint via `prometheus/client_golang`
 - [ ] `/healthz` (always 200)
 - [ ] `/readyz` with DB ping + scheduler-staleness check + worker heartbeat

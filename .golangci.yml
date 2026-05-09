@@ -6,6 +6,17 @@ linters:
     - staticcheck
     - unused
     - ineffassign
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: '^slog\.(Debug|Info|Warn|Error)$'
+          msg: "use internal/obs helpers or obs.Logger(ctx) — slog.{Debug,Info,Warn,Error} bypass request_id propagation"
+  exclusions:
+    rules:
+      - path: ^internal/obs/
+        linters:
+          - forbidigo
 formatters:
   enable:
     - gofmt
