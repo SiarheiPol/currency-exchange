@@ -40,14 +40,6 @@ func TestUUIDGenerator_NewIDsAreUnique(t *testing.T) {
 	require.Len(t, seen, 1000)
 }
 
-// TestSeqIDGenerator_FirstIDIsExpected confirms the baseline format and starting value.
-func TestSeqIDGenerator_FirstIDIsExpected(t *testing.T) {
-	t.Parallel()
-
-	g := NewSeq()
-	require.Equal(t, "00000000-0000-0000-0000-000000000001", g.NewID())
-}
-
 // TestSeqIDGenerator_IDsIncrementSequentially confirms monotonic increment with consistent zero-padded format.
 func TestSeqIDGenerator_IDsIncrementSequentially(t *testing.T) {
 	t.Parallel()

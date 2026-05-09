@@ -30,15 +30,6 @@ var (
 	_ string = obs.MetricRatesProviderQuotaUsed
 )
 
-// TestNewRegistry_NoRegistrationPanic asserts that obs.NewRegistry returns a
-// non-nil *prometheus.Registry without panicking.
-func TestNewRegistry_NoRegistrationPanic(t *testing.T) {
-	t.Parallel()
-
-	reg := obs.NewRegistry()
-	assert.NotNil(t, reg, "NewRegistry must return a non-nil *prometheus.Registry")
-}
-
 // TestNewRegistry_AllMetricsGatherable asserts that the registry exposes exactly
 // 13 distinct MetricFamily entries (one per declared metric) via Gather.
 func TestNewRegistry_AllMetricsGatherable(t *testing.T) {

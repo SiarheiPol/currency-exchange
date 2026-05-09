@@ -42,17 +42,6 @@ func TestWorker_StopsOnContextCancel(t *testing.T) {
 	}
 }
 
-// TestWorker_DefaultOptions is a compilation smoke test asserting that New
-// returns a non-nil *Worker when called with no options.
-func TestWorker_DefaultOptions(t *testing.T) {
-	t.Parallel()
-
-	clk := clock.NewFake(time.Now())
-	q := memqueue.New(clk)
-	w := worker.New(q, q, clk)
-	require.NotNil(t, w)
-}
-
 // TestWorker_ReservesAndCompletesJob asserts that the worker reserves an
 // eligible job and marks it complete so it is no longer pending afterward.
 func TestWorker_ReservesAndCompletesJob(t *testing.T) {

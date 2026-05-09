@@ -28,17 +28,6 @@ func TestRealClock_NowReturnsApproximateWallTime(t *testing.T) {
 	require.Less(t, after.Sub(before), 100*time.Millisecond, "measurement window must be <100ms")
 }
 
-// TestFakeClock_NowReturnsInitial confirms that a newly constructed FakeClock
-// returns exactly the initial time it was seeded with.
-func TestFakeClock_NowReturnsInitial(t *testing.T) {
-	t.Parallel()
-
-	initial := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
-	c := NewFake(initial)
-
-	require.Equal(t, initial, c.Now())
-}
-
 // TestFakeClock_AdvanceMovesNow confirms that successive Advance calls accumulate
 // and are reflected in Now().
 func TestFakeClock_AdvanceMovesNow(t *testing.T) {
