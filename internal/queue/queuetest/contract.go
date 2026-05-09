@@ -530,11 +530,16 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			results []result
 		)
 
+		// Single shared SeqIDGenerator (goroutine-safe via internal mutex) so
+		// every goroutine gets a distinct job.ID. Without this the previous
+		// code created a fresh NewSeq() per goroutine — all started at 1, so
+		// all 100 jobs collided on PK as well as on dedup_key. ON CONFLICT
+		// (dedup_key) only handles the targeted constraint; the PK conflict
+		// propagated as an intermittent flake.
+		idg := idgen.NewSeq()
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
-			// Each goroutine uses its own SeqIDGenerator so IDs are distinct.
-			localIDG := idgen.NewSeq()
-			job := newJob(clk, localIDG, "EUR", "race-key")
+			job := newJob(clk, idg, "EUR", "race-key")
 			go func(j queue.Job) {
 				defer wg.Done()
 				id, inserted, err := q.Enqueue(ctx, j)
