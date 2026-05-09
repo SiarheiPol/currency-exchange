@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"currency-exchange/internal/clock"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 )
 
@@ -49,12 +50,14 @@ func New(c clock.Clock) *Queue {
 
 // Enqueue inserts j or, if a job with the same DedupKey already exists,
 // returns its id with inserted=false.
-func (q *Queue) Enqueue(_ context.Context, j queue.Job) (queue.JobID, bool, error) {
+func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if j.DedupKey != "" {
 		if existingID, ok := q.dedup[j.DedupKey]; ok {
+			obs.CoalescingCollapsedTotal.Inc()
+			obs.LogCoalescingCollapsed(ctx, j.Currency, j.DedupKey)
 			return existingID, false, nil
 		}
 	}

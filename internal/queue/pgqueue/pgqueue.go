@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"currency-exchange/internal/clock"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 )
 
@@ -70,6 +71,8 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 		if err2 != nil {
 			return "", false, fmt.Errorf("pgqueue enqueue: lookup existing: %w", err2)
 		}
+		obs.CoalescingCollapsedTotal.Inc()
+		obs.LogCoalescingCollapsed(ctx, j.Currency, j.DedupKey)
 		return queue.JobID(existingID), false, nil
 	}
 

@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/idgen"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 	"currency-exchange/internal/queue/pgqueue"
 	"currency-exchange/internal/testhelper/pgtest"
@@ -88,4 +90,44 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 	assert.Nil(t, dbLeaseUntil)
 	assert.Nil(t, dbCompletedAt)
 	assert.Nil(t, dbLastError)
+}
+
+// TestEnqueue_CoalescingCounterIncrements asserts that the second Enqueue of
+// a job sharing a dedup_key advances obs.CoalescingCollapsedTotal by exactly
+// one. NOT t.Parallel'd: the counter is a global singleton, and parallel
+// subtests in the contract suite Enqueue many jobs with shared dedup_keys.
+// As a non-parallel top-level test it runs in the serial phase before the
+// parallel batch, so the delta is exact.
+func TestEnqueue_CoalescingCounterIncrements(t *testing.T) {
+	knownTime := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(knownTime)
+	pool := pgtest.NewDB(t)
+	q := pgqueue.New(pool, clk)
+	ctx := context.Background()
+	idg := idgen.NewSeq()
+
+	j1 := queue.Job{
+		ID:        queue.JobID(idg.NewID()),
+		Currency:  "EUR",
+		DedupKey:  "k-coalesce",
+		NextRunAt: knownTime,
+	}
+	j2 := queue.Job{
+		ID:        queue.JobID(idg.NewID()),
+		Currency:  "EUR",
+		DedupKey:  "k-coalesce",
+		NextRunAt: knownTime,
+	}
+
+	_, _, err := q.Enqueue(ctx, j1)
+	require.NoError(t, err)
+
+	before := testutil.ToFloat64(obs.CoalescingCollapsedTotal)
+	_, inserted, err := q.Enqueue(ctx, j2)
+	require.NoError(t, err)
+	require.False(t, inserted, "second Enqueue with same dedup_key must not insert")
+
+	after := testutil.ToFloat64(obs.CoalescingCollapsedTotal)
+	require.Equal(t, before+1, after,
+		"expected CoalescingCollapsedTotal to advance by exactly 1 on collapse")
 }
