@@ -1,4 +1,4 @@
-.PHONY: check test lint generate run migrate-up migrate-down
+.PHONY: check test test-integration lint generate build run migrate-up migrate-down
 
 check: generate
 	git diff --exit-code
@@ -16,6 +16,9 @@ lint:
 
 generate:
 	go generate ./...
+
+build:
+	go build -o bin/server ./cmd/server
 
 run:
 	go run ./cmd/server
