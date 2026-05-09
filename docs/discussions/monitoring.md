@@ -40,19 +40,19 @@ Fields on every line:
 - `service` — fixed string, set at startup.
 - `version` — git SHA or release tag, set at startup.
 
-Domain-specific fields (`currency`, `job_id`, `bucket`, `provider`, `attempts`, `error`) are added by the caller. There are no free-form strings glued into `msg`; details go into structured fields.
+Domain-specific fields (`base`, `quote`, `job_id`, `bucket`, `provider`, `attempts`, `error`) are added by the caller. There are no free-form strings glued into `msg`; details go into structured fields.
 
 Example:
 ```json
-{"time":"2026-04-29T12:00:01.234Z","level":"info","msg":"job completed","request_id":"r-abc","job_id":"j-9b6e","currency":"EUR","duration_ms":214}
+{"time":"2026-04-29T12:00:01.234Z","level":"info","msg":"job completed","request_id":"r-abc","job_id":"j-9b6e","base":"EUR","quote":"MXN","duration_ms":214}
 ```
 
 ### What we log
 
 - **HTTP request boundaries.** One line per request, at `info`. Method, path, status, duration. Server-internal errors at `error`.
-- **Job lifecycle.** Reserve, complete, reschedule, fail. One line per transition at `info`. Full payload of failures at `warn`/`error`.
+- **Job lifecycle.** Reserve, complete, reschedule, fail. One line per transition at `info`. Full payload of failures at `warn`/`error`. Structured fields `base` and `quote` replace the former single `currency` field.
 - **Scheduler ticks.** One line per tick at `debug` (high cardinality if `T` is short).
-- **Upstream calls.** One line per call at `info` with provider name, currency list, duration, status. Failures at `warn`.
+- **Upstream calls.** One line per HTTP call at `info` with provider name, base currency, quote currency list for that base, duration, and status. One log line per base currency (not one per pair). Failures at `warn`.
 - **Coalescing collapses.** One line at `debug` when an enqueue joined an existing job.
 
 ### What we never log
@@ -85,14 +85,17 @@ const (
 Hot, recurring events also have **typed helper functions** that fix both the `msg` and the required field set:
 
 ```go
-func LogJobCompleted(ctx context.Context, jobID, currency string, duration time.Duration) {
+func LogJobCompleted(ctx context.Context, jobID, base, quote string, duration time.Duration) {
     Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvJobCompleted,
         slog.String("job_id", jobID),
-        slog.String("currency", currency),
+        slog.String("base", base),
+        slog.String("quote", quote),
         slog.Int64("duration_ms", duration.Milliseconds()),
     )
 }
 ```
+
+Note: this is a discussion doc change showing the intended signature. The actual Go code change is in C1/C2 scope, not C0.
 
 Helpers exist for the most common events (HTTP boundaries, job lifecycle, upstream calls). Rare events (startup banners, panics) call `Logger(ctx).LogAttrs(ctx, level, EvX, ...)` directly with a constant.
 
@@ -140,9 +143,9 @@ Path label is the **route template** (`/quotes/:id`), not the concrete URL — o
 
 | Metric | Type | Labels |
 |---|---|---|
-| `rates_provider_requests_total` | counter | `provider`, `outcome` (`ok`, `error`, `quota_exceeded`) |
+| `rates_provider_requests_total` | counter | `provider`, `outcome` (`ok`, `transient`, `permanent`, `quota_exceeded`) |
 | `rates_provider_request_duration_seconds` | histogram | `provider` |
-| `rates_provider_quota_used` | gauge | `provider`, `period` (`minute`, `day`, `month`) — populated by the rate-limit subsystem |
+| `rates_provider_quota_used` | gauge | `provider`, `period` (`month`) — populated by the rate-limit subsystem. Period `month` is the only billing cycle relevant to apilayer-family plans. |
 
 The quota gauge gives ops an early warning before the upstream returns `quota_exceeded`.
 
@@ -178,8 +181,8 @@ OpenTelemetry tracing (`traceparent`, span hierarchy, exporter to Tempo/Jaeger) 
 - Postgres reachability (`SELECT 1`). Without a database, the service cannot serve any endpoint.
 
 **Soft checks** (failure → `200` with `degraded` field set, plus an alert via metrics):
-- Last scheduler tick within `2 × T`. A stuck scheduler degrades `/quotes/latest/:currency` freshness, but the pod can still serve `/quotes/:id` reads, accept `POST /quotes/refresh` (which fills `quotes` itself when worker processes the job), and serve any not-yet-stale `/quotes/latest/:currency` data. Removing it from rotation makes the situation worse, not better.
-- Worker loop heartbeat (`worker_last_iteration_seconds_ago` < threshold). If the worker is stuck but the scheduler is healthy, `/quotes/latest/:currency` continues to work via the scheduler-driven cache. A stuck worker means refresh-driven jobs queue up; that is visible via `quote_jobs_pending_count` and warrants an alert, not pod removal.
+- Last scheduler tick within `2 × T`. A stuck scheduler degrades `/quotes/latest?base=BASE&quote=QUOTE` freshness, but the pod can still serve `/quotes/:id` reads, accept `POST /quotes/refresh` (which fills `quotes` itself when worker processes the job), and serve any not-yet-stale `/quotes/latest?base=BASE&quote=QUOTE` data. Removing it from rotation makes the situation worse, not better.
+- Worker loop heartbeat (`worker_last_iteration_seconds_ago` < threshold). If the worker is stuck but the scheduler is healthy, `/quotes/latest?base=BASE&quote=QUOTE` continues to work via the scheduler-driven cache. A stuck worker means refresh-driven jobs queue up; that is visible via `quote_jobs_pending_count` and warrants an alert, not pod removal.
 
 Body shape:
 
@@ -227,7 +230,7 @@ We define the **shape** of SLOs without committing to numbers (numbers come from
 
 - **Availability SLI.** Successful HTTP responses (2xx, 3xx) over total HTTP responses, excluding 4xx caused by client errors.
 - **Latency SLI.** p99 of `http_request_duration_seconds` for the read path (`GET /latest`).
-- **Freshness SLI.** Age of the most recent successful row in `quotes` per currency, computed as `now() - max(quotes.updated_at)`. The SLO target is the **maximum acceptable staleness**, which depends on three independent factors:
+- **Freshness SLI.** Age of the most recent successful row in `quotes` per currency pair, computed as `now() - max(quotes.updated_at)`. The SLO target is the **maximum acceptable staleness**, which depends on three independent factors:
   - `W` (coalescing window) — the floor of refresh-driven update cadence.
   - `T` (scheduler tick) — quiet-traffic cadence.
   - Provider cadence — the external freshness ceiling (Free/Basic = daily, Pro+ = 10min, Business = 60s).

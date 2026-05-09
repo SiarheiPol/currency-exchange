@@ -6,23 +6,25 @@ Classical `Idempotency-Key` support is **designed but not implemented in MVP**. 
 
 ## Relationship to request coalescing
 
-The MVP already has a **request coalescing** layer, described in `background-mechanism.md` (search for `dedup_key`, `INSERT ... ON CONFLICT`, and the bucket formula). Coalescing collapses concurrent enqueues for the same `(currency, bucket)` into a single job and protects upstream cost.
+The MVP already has a **request coalescing** layer, described in `background-mechanism.md` (search for `dedup_key`, `INSERT ... ON CONFLICT`, and the bucket formula). Coalescing collapses concurrent enqueues for the same `(base, quote, bucket)` into a single job and protects upstream cost.
 
 **Coalescing is not classical idempotency.** It works at the level of background work (one upstream fetch per bucket), not at the level of HTTP response replay. The two address different problems and live at different layers:
 
 | | Request coalescing (MVP) | Classical idempotency (Stage 6) |
 |---|---|---|
-| Where the key comes from | server, derived from `(currency, bucket)` | client, sent in `Idempotency-Key` header |
+| Where the key comes from | server, derived from `(base, quote, bucket)` | client, sent in `Idempotency-Key` header |
 | What is deduplicated | upstream **work** | client **response** (byte-for-byte replay) |
 | Window | seconds (MVP `W = 30s`) | hours (24h is the de-facto standard) |
 | Storage | `quote_jobs.dedup_key` | new table `idempotency_keys` |
 | Goal | cost protection, multi-producer collapse | retry safety under unreliable networks |
 
+**Coalescing formula (updated):** `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)`. Each pair has its own `update_id` per the PDF specification; per-base grouping would lose the 1:1 pair-to-job mapping.
+
 A caller that retries a timed-out HTTP request cannot rely on coalescing — by the time the retry reaches the server, the original `W`-second bucket has usually moved on, and the retry creates a new job. Coalescing only fires when both requests land inside the same bucket, which is mostly true for concurrent requests, not for retries seconds later. The standard `Idempotency-Key` pattern fills that gap.
 
 ### Why shared `update_id` across callers is acceptable
 
-Coalescing on `(currency, bucket)` (no caller component) means two different callers refreshing `EUR` in the same bucket receive the **same** `update_id`. This is intentional and acceptable here for three reasons:
+Coalescing on `(base, quote, bucket)` (no caller component) means two different callers refreshing the `EUR/MXN` pair in the same bucket receive the **same** `update_id`. This is intentional and acceptable here for three reasons:
 
 - The HTTP layer **does not authenticate**; auth is delegated to the gateway in front of the service. The service has no concept of "caller" beyond `X-Request-Id`.
 - The data behind an `update_id` is a **public currency rate**, not personalised information. Sharing the id between callers does not leak anything caller-specific.
@@ -32,9 +34,9 @@ The Cache-Control `private` on `GET /quotes/:id` (in `api-contract.md`) is a def
 
 ### Status-unaware dedup: trade-off
 
-The dedup key is `(currency, bucket)`. It does not consider whether a previous job for the same currency is still `pending` or `running`. Consequence: at the bucket boundary, while the previous bucket's worker is still fetching, a refresh that lands in the next bucket will trigger a second concurrent upstream call.
+The dedup key is `(base, quote, bucket)`. It does not consider whether a previous job for the same pair is still `pending` or `running`. Consequence: at the bucket boundary, while the previous bucket's worker is still fetching, a refresh that lands in the next bucket will trigger a second concurrent upstream call.
 
-This is intentional. Adding "skip if a pending or running job for this currency exists" makes the insert path stateful (must check job status under a lock or via a separate query), losing the simplicity of a single `INSERT ... ON CONFLICT` statement.
+This is intentional. Adding "skip if a pending or running job for this pair exists" makes the insert path stateful (must check job status under a lock or via a separate query), losing the simplicity of a single `INSERT ... ON CONFLICT` statement.
 
 Mitigation that does **not** require code changes: choose `W` significantly larger than the upstream `p99` latency. Concretely, `W ≥ 2 × upstream_p99` keeps stampedes rare. The defaults in `capacity.md` are well above this threshold for all supported tariffs.
 

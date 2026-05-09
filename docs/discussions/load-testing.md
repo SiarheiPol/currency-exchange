@@ -59,8 +59,12 @@ Many concurrent refresh calls for the **same currency** within one bucket. Shoul
 Use the fake provider's plan-simulation features to inject:
 - High latency (500ms–5s response).
 - Random `5xx` responses.
-- Quota-exceeded responses.
-- Total provider unavailability.
+- `success: false` with API code 104 (quota exceeded).
+- `success: false` with API code 101 (invalid key — simulates auth failure).
+- `success: false` with API code 202 (if provider supports it; otherwise silent currency drop).
+- Partial response (some pairs returned, others silently dropped — primary error path).
+- Total provider unavailability (connection refused).
+- Malformed JSON response.
 
 Validates retry budget, backoff behaviour, and graceful degradation. Pairs naturally with `resilience.md` decisions.
 

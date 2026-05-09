@@ -7,12 +7,12 @@ Go HTTP service providing currency exchange rate quotes via an asynchronous refr
 The service exposes three endpoints with two roles:
 
 - `POST /quotes/refresh` and `GET /quotes/:id` form an **asynchronous pair**. The client triggers a fetch, receives an `update_id`, and polls for the result.
-- `GET /quotes/latest/:currency` is a **synchronous read** of the most recent successful quote.
+- `GET /quotes/latest?base=BASE&quote=QUOTE` is a **synchronous read** of the most recent successful quote for a currency pair.
 
 Refresh flow:
 
 ```
-1. Client → POST /quotes/refresh {"currency":"EUR"}
+1. Client → POST /quotes/refresh {"base":"EUR","quote":"MXN"}
             ↓
    Service responds 202 Accepted {"id":"abc-..."}
             (job is enqueued; handler does not perform the fetch)
@@ -26,7 +26,7 @@ Refresh flow:
               {"status":"done", "price":..., "updated_at":...}  on success
               {"status":"failed", "error":...}  after retries exhausted
 
-4. Client → GET /quotes/latest/EUR  (any time, independent of refresh)
+4. Client → GET /quotes/latest?base=EUR&quote=MXN  (any time, independent of refresh)
             Service responds 200 with the most recent successful quote.
 ```
 
@@ -36,9 +36,9 @@ Refresh flow:
 
 | Endpoint | Method | Body / Path | Response |
 |---|---|---|---|
-| `/quotes/refresh` | POST | `{"currency":"EUR"}` | `202 Accepted {"id":"..."}` |
+| `/quotes/refresh` | POST | `{"base":"EUR","quote":"MXN"}` | `202 Accepted {"id":"..."}` |
 | `/quotes/:id` | GET | path: UUID | `200 OK` with `status`, `price`, `updated_at`, etc. |
-| `/quotes/latest/:currency` | GET | path: currency code | `200 OK {"currency","price","updated_at"}` or `404` |
+| `/quotes/latest` | GET | query: `base=EUR&quote=MXN` | `200 OK {"base","quote","price","updated_at"}` or `404` |
 
 Operational endpoints:
 | Endpoint | Purpose |
@@ -53,7 +53,7 @@ Detailed contract (request/response shapes, headers, error envelope, edge case m
 
 ## Supported Currencies
 
-MVP whitelist: **`USD`, `EUR`, `MXN`**. Configured via env var; enforced at the validation layer with two-step check (format → whitelist) producing distinct error codes (`invalid_request` vs `unsupported_currency`).
+MVP whitelist: **`USD`, `EUR`, `MXN`**. The service autogenerates all 6 ordered pairs at startup, excluding self-pairs. Configured via env var; enforced at the validation layer with three-step check (format → whitelist → self-pair) producing distinct error codes (`invalid_request` vs `unsupported_currency`).
 
 Adding a currency is a configuration change, not a code change. The architecture imposes no hard limit on whitelist size; capacity numbers in `discussions/capacity.md` assume three.
 

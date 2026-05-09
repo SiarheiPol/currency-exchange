@@ -17,21 +17,31 @@ The major failure modes the service must survive:
 
 | # | Failure | Class |
 |---|---|---|
-| 1 | Upstream rates provider unreachable (DNS, connection refused, network partition) | transient |
+| 1 | Upstream unreachable (DNS, connection refused, network partition) | transient |
 | 2 | Upstream timeout | transient |
 | 3 | Upstream returns 5xx | transient |
-| 4 | Upstream returns 429 (rate limit) | transient |
-| 5 | Upstream quota exhausted (monthly budget) | transient (resets) |
-| 6 | Upstream returns 401/403 (auth) | permanent |
-| 7 | Upstream returns 400 (bad request) | permanent |
-| 8 | Upstream returns malformed JSON | permanent |
-| 9 | Database unreachable | transient |
-| 10 | Database query slow (timeout) | transient |
-| 11 | Panic in handler / worker | transient (per-request) |
-| 12 | Process killed (OOM, SIGKILL, hardware) | transient (orchestrator restarts) |
-| 13 | Bad configuration on startup | permanent (refuse to start) |
+| 4 | API code 104 (usage limit reached — monthly quota) | transient (resets at period boundary) |
+| 5 | API code 101 (invalid access key) | permanent |
+| 6 | API code 102 (inactive account) | permanent |
+| 7 | API code 103 (no access to endpoint) | permanent |
+| 8 | API code 105 (function access restricted — rare on Free plan; any source empirically allowed) | permanent |
+| 9 | API code 106 (no results for query) | permanent |
+| 10 | API code 201 (invalid base currency — rare; provider may silently drop instead) | permanent |
+| 11 | API code 202 (invalid currency code — rare; provider silently drops invalid codes instead of rejecting, empirically confirmed) | permanent |
+| 12 | API code 404 (unknown endpoint) | permanent |
+| 13 | Upstream returns `success: false` with unrecognised code | permanent (unknown — fail safe) |
+| 14 | Upstream returns malformed JSON (`success` field absent or unparseable) | transient |
+| 15 | Database unreachable | transient |
+| 16 | Database query slow (timeout) | transient |
+| 17 | Panic in handler / worker | transient (per-request) |
+| 18 | Process killed (OOM, SIGKILL, hardware) | transient (orchestrator restarts) |
+| 19 | Bad configuration on startup | permanent (refuse to start) |
 
 For each, the response is described below. **Transient** means the service retries or routes traffic away and recovers automatically. **Permanent** means human intervention is needed — alert, fail-fast, do not retry.
+
+> Row 14 (malformed JSON) is reclassified **transient** (not permanent as in the original draft). Rationale: a malformed response is more likely a transient upstream glitch (partial response, proxy injection) than a permanent API contract break. If it recurs every retry it is caught by the retry budget. Alert on sustained occurrence.
+>
+> Row 11 (code 202 — invalid currency code) is listed as "rare" because empirical testing shows that `currencies=ZZZ,EUR` returns `{success:true, quotes:{USDEUR}}` — the invalid code is **silently dropped** rather than triggering code 202. Code 202 is retained in the table for completeness (it can still occur in documented scenarios) but is not the primary error path.
 
 ## Timeouts everywhere
 
@@ -62,28 +72,47 @@ The lint rule (Stage 2 of `implementation-roadmap.md`) blocks naked `context.Bac
 
 ## Upstream error classification
 
-When `RatesProvider.FetchBatch` returns an error, the worker maps it to one of two actions in MVP: **reschedule** or **fail**. (Stage 6 adds a third action when the circuit breaker is in place — see the deferred section below.)
+When `RatesProvider.FetchPairs` returns an error, the worker maps it to one of two actions in MVP: **reschedule** or **fail**. (Stage 6 adds a third action when the circuit breaker is in place — see the deferred section below.)
 
 | Error | Class | Action |
 |---|---|---|
 | Connection refused / DNS error | transient | reschedule (backoff) |
 | Read/write timeout | transient | reschedule (backoff) |
-| `502/503/504` | transient | reschedule (backoff) |
-| `429 Too Many Requests` | transient | reschedule (longer backoff, honour `Retry-After` if present) |
-| Quota exceeded (provider-specific code) | transient | reschedule far ahead (`now + 1h`); alert ops |
-| `401/403` | permanent | fail job; alert ops (auth issue) |
-| `400` | permanent | fail job (request malformed — our bug or whitelist drift) |
-| `200` with malformed body | permanent | fail job; alert (provider broke contract) |
-| Unknown 4xx | permanent | fail job; log full response for diagnosis |
+| HTTP `502/503/504` | transient | reschedule (backoff) |
+| `success: false`, API code 104 (quota) | transient | reschedule far ahead (`now + 1h`); alert ops |
+| `success: false`, API codes 101/102/103/105/106 (auth, access) | permanent | fail job; alert ops |
+| `success: false`, API codes 201/202/404 (invalid query) | permanent | fail job; log full response |
+| `success: false`, unrecognised code | permanent | fail job; log for diagnosis |
+| `success: true`, requested pair absent from response (silent drop) | synthesised per-pair `ProviderError` | treat as permanent for that pair; fail job |
+| Malformed JSON or `success` field absent | transient | reschedule (backoff) |
+| Unknown 4xx at HTTP level | permanent | fail job; log full response for diagnosis |
+
+> **Detection of `success: false`**: the upstream returns `success: false` with HTTP 200, not with a 4xx/5xx status. The client must inspect the body, not the HTTP status code, to detect these failures. `ProviderError.APICode` carries the numeric API error code for diagnosis and classification.
 
 The classification is implemented in `RatesProvider`'s error type:
 
 ```go
 type ProviderError struct {
     Code     string  // "transient" | "permanent" | "quota_exceeded"
-    HTTPCode int
+    HTTPCode int     // HTTP status code, or zero if failure was not HTTP-level
+    APICode  int     // upstream API error code (e.g. 101, 104, 202), or zero
     Message  string
     Cause    error
+}
+
+func (e *ProviderError) Error() string {
+    s := fmt.Sprintf("provider error [%s]", e.Code)
+    if e.HTTPCode != 0 {
+        s += fmt.Sprintf(" http=%d", e.HTTPCode)
+    }
+    if e.APICode != 0 {
+        s += fmt.Sprintf(" api_code=%d", e.APICode)
+    }
+    s += ": " + e.Message
+    if e.Cause != nil {
+        s += ": " + e.Cause.Error()
+    }
+    return s
 }
 
 func (e *ProviderError) IsTransient() bool { return e.Code == "transient" || e.Code == "quota_exceeded" }
@@ -121,35 +150,31 @@ A circuit breaker reduces wasted timeouts and prevents amplification on a strugg
 
 **Stage B caveat.** `scaling.md > Stage B` says no code changes are needed to go multi-instance. That is true under stable upstream. If multi-instance deployment coincides with recurring upstream outages, jump to Stage 6 breaker work alongside Stage B — the amplification of `K_per_pod × pod_count × max_attempts` retries on a struggling upstream becomes harmful.
 
-**Design sketch for Stage 6:** standard three-state machine (closed / open / half-open) with `failure_threshold = 5`, `cooldown = 30s`, single half-open probe. Library `github.com/sony/gobreaker` or equivalent, wraps `RatesProvider.FetchBatch`. State is per-instance — no cross-instance coordination needed. Metric `rates_provider_breaker_state{provider,state}` is added when the breaker is wired in.
+**Design sketch for Stage 6:** standard three-state machine (closed / open / half-open) with `failure_threshold = 5`, `cooldown = 30s`, single half-open probe. Library `github.com/sony/gobreaker` or equivalent, wraps `RatesProvider.FetchPairs`. State is per-instance — no cross-instance coordination needed. Metric `rates_provider_breaker_state{provider,state}` is added when the breaker is wired in.
 
 Subtle: **not all errors should trip the breaker.** `429` (rate limit), `quota_exceeded`, and `permanent` errors must be excluded — they are not symptoms of upstream sickness, and tripping the breaker on them only worsens the situation.
 
 ## Multi-provider fallback (deferred — Stage 6)
 
-Not implemented in MVP. We support a single rates provider configured via env. Single-provider failure equals service degradation; the mitigation is alerting on `rates_provider_requests_total{outcome="error"}` and operator response.
+Not implemented in MVP. We support a single rates provider configured via env. Single-provider failure equals service degradation; the mitigation is alerting on `rates_provider_requests_total{outcome="transient"}` and operator response.
 
 The architecture supports extension: `RatesProvider` is an interface, and a chain wrapper would walk a list of providers, falling through to the next on transient errors. Sketch for Stage 6 reference:
 
 ```go
-type chainProvider struct {
-    providers []RatesProvider
-}
-
-func (c *chainProvider) FetchBatch(ctx context.Context, currencies []string) (map[string]Quote, error) {
+func (c *chainProvider) FetchPairs(ctx context.Context, pairs []Pair) (FetchResult, error) {
     var lastErr error
     for _, p := range c.providers {
-        result, err := p.FetchBatch(ctx, currencies)
+        result, err := p.FetchPairs(ctx, pairs)
         if err == nil {
             return result, nil
         }
         lastErr = err
         var pe *ProviderError
         if errors.As(err, &pe) && !pe.IsTransient() {
-            return nil, err  // permanent → do not try fallback
+            return FetchResult{}, err  // permanent → do not try fallback
         }
     }
-    return nil, lastErr
+    return FetchResult{}, lastErr
 }
 ```
 
@@ -190,7 +215,7 @@ The quota gauge `rates_provider_quota_used` is updated from this table on each c
 
 ### What counts a token
 
-The token is consumed by **`RatesProvider.FetchBatch` actually making an HTTP call**. Specifically:
+The token is consumed by **`RatesProvider.FetchPairs` actually making an HTTP call**. Specifically:
 
 - A successful call (any status, including 4xx/5xx — provider charges for the request itself, not for "useful" responses): **consumes one token**.
 - A call short-circuited by the bucket being empty: **does not consume a token** (no HTTP made).
@@ -303,7 +328,7 @@ Wireframe — concrete runbooks live in the deployment repo when there is one.
 
 | Failure | Detection | First response |
 |---|---|---|
-| Upstream unreachable | metric `rates_provider_requests_total{outcome="error"}` rising | retries continue with backoff; alert if sustained > N minutes |
+| Upstream unreachable | metric `rates_provider_requests_total{outcome="transient"}` rising | retries continue with backoff; alert if sustained > N minutes |
 | Upstream quota exhausted | `rates_provider_quota_used` ≥ 1.0; `rates_provider_requests_total{outcome="quota_exceeded"}` rising | alert ops; consider tariff upgrade; service returns stale data until next period |
 | DB unreachable | `/readyz` fails | LB removes pod from rotation; ops investigates DB |
 | Workers falling behind | `quote_jobs_pending_count` rising; throughput unchanged | scale `K`; check for upstream slowness |

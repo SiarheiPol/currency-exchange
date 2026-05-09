@@ -13,7 +13,7 @@ This document does **not** repeat the **why** of each parameter — that lives i
 
 ## Tariff matrix
 
-Reference: `exchangerate.host` plans (other providers have similar tiers).
+Reference: apilayer-family plans (currencylayer, fixer, exchangeratesapi.io — all share similar tiers). Note: Free plan accepts any `source` currency (any source tested: USD, EUR, MXN all returned `success: true`). This contradicts the public documentation but was empirically confirmed.
 
 | Plan | Monthly quota | Upstream cadence | Cost | Suitable for |
 |---|---|---|---|---|
@@ -26,24 +26,24 @@ The cadence is the rate at which the provider itself refreshes data. Calling mor
 
 ## Recommended `T` and `W` per plan
 
-`T` = scheduler tick (freshness floor). `W` = coalescing window (upstream call ceiling). Constraint: `W ≤ T`. Both formulae assume batched `FetchBatch(USD, EUR, MXN)` — one upstream call per scheduler tick covers all three currencies.
+`T` = scheduler tick (freshness floor). `W` = coalescing window (upstream call ceiling). Constraint: `W ≤ T`. Both formulae assume one HTTP call per unique base currency per scheduler tick (`apilayerProvider` groups pairs by base). For whitelist [USD, EUR, MXN], one scheduler tick triggers up to 3 HTTP calls (one per base), each returning 2 quote values. "Calls / month" in the table counts HTTP calls, not scheduler ticks.
 
 | Plan | `T` | `W` | Calls / month | % quota |
 |---|---|---|---|---|
-| Free | 24h | 1h | ~30 | 30% |
-| Basic | 4h | 1h | ~180 | 1.8% |
-| Pro+ | 10min | 1min | ~4 320 | 4.3% |
-| Business | 60s | 30s | ~43 200 | 8.6% |
+| Free | 24h | 1h | ~90 | 90% |
+| Basic | 4h | 1h | ~540 | 5.4% |
+| Pro+ | 10min | 1min | ~12 960 | 13% |
+| Business | 60s | 30s | ~129 600 | 25.9% |
 
 **Headroom is intentional.** A scheduler running at exact provider cadence × number of currencies leaves zero margin for client-driven refreshes. Settings above keep the scheduler comfortably below the quota and allow client `POST /quotes/refresh` calls to consume the rest of the budget.
 
-**Free plan is borderline.** With 100 calls/month and daily cadence, the scheduler alone (24h tick) costs 30/month. Any additional client refresh activity competes for the remaining 70 calls. Use Free for proof-of-life only.
+**Free plan headroom is now tighter** after the 3×-per-tick correction: ~90 calls/month for the scheduler alone, leaving only ~10 calls for client-driven refreshes. Use Free for proof-of-life only; Basic is the minimum for any meaningful testing. On the positive side, any `source` is accepted on Free plan (empirically confirmed), so no USD-source restriction applies.
 
 **Setting `W > T` is forbidden by configuration validation.** A startup check refuses to run if `W > T` (degenerate case, see `idempotency.md`).
 
 ## Worker pool `K`
 
-Default `K = 1`. Reasoning in `background-mechanism.md`: with batched `FetchBatch`, one worker per tick is enough.
+Default `K = 1`. Reasoning in `background-mechanism.md`: with batched `FetchPairs`, one worker per tick is enough.
 
 | Trigger | Action |
 |---|---|
@@ -60,14 +60,14 @@ Defaults from `resilience.md`, repeated here with the rationale:
 
 | Timeout | Default | Why |
 |---|---|---|
-| Outbound HTTP (upstream) | 5s | exchangerate.host typical p99 ~500ms; 10× margin covers congestion |
+| Outbound HTTP (upstream) | 5s | apilayer-family typical p99 ~500ms; 10× margin covers congestion |
 | DB per-query | 2s | typical query <10ms; 200× margin covers slow plans |
 | DB pool acquisition | 1s | acquisition under healthy pool is sub-millisecond |
 | HTTP server `ReadTimeout` | 10s | client upload should not exceed this for any request body |
 | HTTP server `WriteTimeout` | 30s | leaves room for handler + DB + serialisation; not for upstream (handler returns fast) |
 | HTTP server `IdleTimeout` | 60s | standard for keep-alive |
 | `/readyz` total | 2s | sum of internal checks must fit |
-| Worker job lease | 60s | longer than the longest legitimate `FetchBatch` × retries |
+| Worker job lease | 60s | longer than the longest legitimate `FetchPairs` × retries |
 | Graceful shutdown | 30s | enough for in-flight DB tx and HTTP responses to drain |
 
 **Tariff-aware tuning.** If the chosen provider has higher latency (some lower-tier APIs are noticeably slower), only the outbound HTTP timeout changes — the others stay.
@@ -91,7 +91,7 @@ For multi-instance deployment: total pool = pods × 25. Postgres `max_connection
 | Table | Per row | Volume @ 1000 jobs/day | 30-day retention | Notes |
 |---|---|---|---|---|
 | `quote_jobs` | ~250 B | 30 000 rows / 7 MB | 7 MB × 1 = 7 MB | trivial; cleanup of `done`/`failed` after 7 days bounds growth |
-| `quotes` | ~80 B | 3 rows total | 240 B | one row per currency, never grows |
+| `quotes` | ~90 B | 6 rows total | 540 B | one row per currency pair (6 pairs for [USD, EUR, MXN]), never grows |
 | `upstream_quota` | ~100 B | 1 row / month | <1 KB | one row per `(provider, period)` |
 | `idempotency_keys` (Stage 6) | ~600 B | 70M rows/day @ 1000 RPS × 80% | TTL 24h: ~41 GB | partitioning needed at this scale |
 
@@ -112,7 +112,7 @@ Stage 6 idempotency keys have their own 24h TTL discussed in `idempotency.md > C
 ### Queries to watch
 
 - `SELECT ... FROM quote_jobs WHERE status='pending' AND next_run_at <= now() FOR UPDATE SKIP LOCKED LIMIT $n` — partial index `quote_jobs_pending_idx` keeps this fast.
-- `INSERT INTO quotes ... ON CONFLICT (currency) DO UPDATE` — primary-key upsert, sub-millisecond.
+- `INSERT INTO quotes ... ON CONFLICT (base, quote) DO UPDATE` — primary-key upsert, sub-millisecond.
 - `SELECT 1` (readiness) — should never appear in slow-query logs.
 
 `pg_stat_statements` enabled at deployment. Any query exceeding p95 of 50ms is investigated.

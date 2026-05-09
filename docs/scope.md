@@ -4,12 +4,12 @@
 
 The MVP delivers, end to end:
 
-- Three HTTP endpoints (`POST /quotes/refresh`, `GET /quotes/:id`, `GET /quotes/latest/:currency`) with the contract from `discussions/api-contract.md`.
-- Whitelist of currencies (`USD`, `EUR`, `MXN`).
+- Three HTTP endpoints (`POST /quotes/refresh`, `GET /quotes/:id`, `GET /quotes/latest?base=BASE&quote=QUOTE`) with the contract from `discussions/api-contract.md`.
+- Whitelist of currencies (`USD`, `EUR`, `MXN`); service autogenerates all ordered pairs at startup (6 pairs for 3 currencies), excluding self-pairs.
 - Postgres-backed queue (`quote_jobs`) with `FOR UPDATE SKIP LOCKED`, lease, and crash recovery.
 - Background scheduler that refreshes whitelist currencies on a tick.
-- Coalescing of concurrent and overlapping refresh requests via `dedup_key`.
-- One real rates provider (`exchangerate.host`) plus a fake provider for dev and load testing.
+- Coalescing of concurrent and overlapping refresh requests via `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)`.
+- One real rates provider (`apilayerProvider` — apilayer-family: currencylayer, fixer, or exchangeratesapi.io) plus a fake provider for dev and load testing.
 - Token bucket protection against monthly quota exhaustion.
 - Structured logging through `internal/obs`, Prometheus metrics, request-id propagation.
 - Health endpoints (`/healthz`, `/readyz`).

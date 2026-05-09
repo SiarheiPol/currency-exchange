@@ -15,21 +15,21 @@ The service has three independent scaling dimensions:
 
 | Axis | What grows with it | First bottleneck |
 |---|---|---|
-| HTTP request rate | inbound `POST /quotes/refresh`, `GET /quotes/:id`, `GET /quotes/latest/:currency` | service instances, DB connection pool |
+| HTTP request rate | inbound `POST /quotes/refresh`, `GET /quotes/:id`, `GET /quotes/latest?base=BASE&quote=QUOTE` | service instances, DB connection pool |
 | DB write throughput | `quote_jobs` inserts, `quotes` upserts | Postgres primary write capacity |
-| DB read throughput | `GET /quotes/latest/:currency` and `GET /quotes/:id` reads | Postgres primary → read replica |
+| DB read throughput | `GET /quotes/latest?base=BASE&quote=QUOTE` and `GET /quotes/:id` reads | Postgres primary → read replica |
 
-**Upstream provider call rate is not a scaling axis.** Coalescing with bucket size `W` caps it at `1/W` calls per currency. With batching across whitelist currencies into one HTTP call, the absolute ceiling is **2 batched calls per minute when `W=30s`**, regardless of user count. Concrete numbers per tariff plan are in `capacity.md > Upstream call ceiling under coalescing`.
+**Upstream provider call rate is not a scaling axis.** Coalescing with bucket size `W` caps it at `1/W` calls per currency. With `apilayerProvider` grouping pairs by base and issuing one HTTP call per unique base, the absolute ceiling is **2 × len(whitelist) calls per minute when `W=30s`** (i.e., 6 HTTP calls per minute for [USD, EUR, MXN]), regardless of user count. Concrete numbers per tariff plan are in `capacity.md > Upstream call ceiling under coalescing` (Free plan: any source allowed empirically — the documented USD-source restriction does not apply in practice).
 
 ## Read pressure dominates at scale
 
 Non-obvious observation: in this service, **read load grows faster than write load** as users multiply.
 
-- A user does at most one `POST /quotes/refresh` per session. Many users only hit `/quotes/latest/:currency`.
-- A user can hit `/quotes/latest/:currency` many times per session (UI ticker, mobile dashboard).
+- A user does at most one `POST /quotes/refresh` per session. Many users only hit `/quotes/latest`.
+- A user can hit `/quotes/latest` many times per session (UI ticker, mobile dashboard).
 - The async pattern adds **`/quotes/:id` polling** RPS — each refresh produces several polls until the job goes terminal.
 
-At 50M users (rough): refresh ~500–1500 RPS, `/quotes/:id` polling ~5 000–15 000 RPS, `/quotes/latest/:currency` ~5 000–40 000 RPS (highly dependent on UI cache discipline and CDN/BFF caching), upstream calls bounded at ~0.03/sec. The architecture prioritises read scalability because that is where pressure rises.
+At 50M users (rough): refresh ~500–1500 RPS, `/quotes/:id` polling ~5 000–15 000 RPS, `/quotes/latest` ~5 000–40 000 RPS (highly dependent on UI cache discipline and CDN/BFF caching), upstream calls bounded at ~0.03/sec. The architecture prioritises read scalability because that is where pressure rises.
 
 ## Stages
 

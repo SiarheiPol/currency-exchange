@@ -90,12 +90,20 @@ Every external dependency goes through an interface. Each interface has a real i
 | Interface | Real | Fake |
 |---|---|---|
 | `JobQueue` | `pgQueue` (Postgres) | `memQueue` (sync map) |
-| `RatesProvider` | `exchangerateHostProvider` | `fakeRatesProvider` (configurable map of currency → quote, configurable error) |
+| `RatesProvider` | `apilayerProvider` | `fakeRatesProvider` (three modes: success / batch-failure / partial-success-with-missing-pair-synthesis) |
 | `Clock` | `realClock` (`time.Now`) | `fakeClock` (advanced manually in tests) |
 | `IDGenerator` | `uuidGenerator` (`uuid.New`) | `seqIDGenerator` (deterministic counter) |
 | `QuoteRepo` (read side for `/latest`) | `pgQuoteRepo` | `memQuoteRepo` |
 
 `Clock` and `IDGenerator` look like overkill, but they make bucket-math and id-equality tests deterministic. Without them, every `time.Now()` and `uuid.New()` call sneaks non-determinism into tests.
+
+**`fakeRatesProvider` modes:**
+
+1. **Success mode.** Returns pre-configured `FetchResult.Quotes` for every requested pair. Used in happy-path worker and scheduler tests.
+2. **Batch-failure mode.** Returns a non-nil `error` (simulates network failure, auth error, quota exhaustion). All reserved jobs will be rescheduled or failed by the worker.
+3. **Partial-success-with-missing-pair-synthesis mode.** Returns `FetchResult` where some pairs are in `Quotes` and others are synthesised as `Errors` (simulating silent drop of a requested pair). Tests the worker's per-pair error dispatch path — this is the **primary error path** given empirically confirmed silent-drop behaviour.
+
+The fake is configured per-test, not globally. Each test sets exactly the mode it needs.
 
 ## What we test
 
@@ -116,8 +124,8 @@ Reserve/Complete/Reschedule/Fail transitions. Crash recovery via lease expiratio
 With `fakeClock` and `fakeRatesProvider`, we test:
 - Bootstrap tick fires at startup.
 - Subsequent ticks fire at the configured `T` interval.
-- Each tick enqueues exactly one job per whitelist currency.
-- Same-bucket dedup returns existing ids.
+- Each tick enqueues exactly one job per whitelist pair (6 jobs for [USD, EUR, MXN]).
+- Same-bucket dedup returns existing ids for the same `(base, quote, bucket)`.
 
 ### Coalescing tests
 
@@ -158,9 +166,12 @@ internal/
     scheduler.go
     scheduler_test.go           // unit: with fakeClock + memQueue
   ratesprovider/
-    exchangeratehost/
-      exchangeratehost.go
-      exchangeratehost_test.go  // unit: with httptest stub server
+    apilayer/
+      apilayer.go
+      apilayer_test.go          // unit: with httptest stub server
+    fake/
+      fake.go
+      fake_test.go              // unit: three-mode fake behaviour tests
 ```
 
 Tests sit next to the code they cover. Black-box tests use `package <name>_test` when imports would otherwise be circular or when we want to test only the public API.
@@ -191,15 +202,11 @@ This keeps the inner-loop of TDD fast: a developer writing handler logic does no
 - Helpers in `*_test.go` files; shared helpers in `internal/testutil` if cross-package.
 - `t.Parallel()` enabled by default unless the test mutates a shared resource (e.g., clock manipulation, package-level state).
 
-## Open questions
+## Resolved questions
 
-- **JSON comparison of dynamic fields in `/latest` responses.** The body has `updated_at`, which is set from the upstream `timestamp` field. Two viable approaches:
-  - **Exact match with controlled time.** `fakeClock` produces a known `now`, the `fakeRatesProvider` returns a known timestamp, the test asserts the exact JSON via `assert.JSONEq`. Strongest, but requires every layer that touches time to honour the injected `Clock`.
-  - **Shape-and-skip.** Compare structure with a helper that ignores `updated_at` (or matches it against a regex). Looser, faster to write, but lets a real bug in the timestamp wiring slip through.
+**`updated_at` testing in `/latest` responses.** Closed. Convention: **exact match with controlled time**. The `fakeRatesProvider` returns a deterministic `timestamp` value; the `fakeClock` produces a known `now`. Tests assert the exact JSON including `updated_at` via `assert.JSONEq`. Shape-and-skip is not used — the timestamp wiring is behaviorally meaningful and must be verified.
 
-  Default leaning: exact match with controlled time, because we have already committed to a `Clock` seam. Shape-and-skip is the fallback for cases where the timestamp originates outside our control (for example, an integration test that hits a real upstream stub).
-
-  Decide and pin the convention when the first such test is written.
+Trigger for revisiting: an integration test that hits a real (but stubbed-at-HTTP-level) upstream where the timestamp originates from the stub, not from `fakeClock`. In that case, use a known stub timestamp constant.
 
 ## Not in scope here
 
@@ -207,4 +214,4 @@ This keeps the inner-loop of TDD fast: a developer writing handler logic does no
 - **Mutation testing.** Out of scope.
 - **Load and stress tests.** Lives in `load-testing.md`.
 - **Chaos / fault-injection tests.** Lives in `resilience.md`.
-- **Contract tests against real exchangerate.host.** We use `httptest` stubs; a smoke test against the real upstream can be added under a separate build tag if we want it in CI.
+- **Contract tests against the real upstream provider.** We use `httptest` stubs; a smoke test against the real upstream can be added under a separate build tag if we want it in CI.

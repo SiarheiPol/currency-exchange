@@ -33,6 +33,14 @@ The `forbidigo` rule for `slog.*` is **not** enabled here — there is no `inter
 
 Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 
+### Stage 1 amendments (pair-based pivot — C0/C1)
+
+- [x] Plan change: pair-based currency model + apilayer-family provider (docs rewrite — C0)
+- [ ] Schema rework: `quote_jobs` and `quotes` tables to pair-based columns (C1)
+- [ ] `Job` struct rework: `Base, Quote string` fields replacing the old single-currency field (C1)
+- [ ] `pgQueue`, `memQueue`, contract tests updated to pair-based `Job` (C1)
+- [ ] `obs/helpers.go` log helpers: `currency string` → `base, quote string` (C1)
+
 - [x] Migration: `quote_jobs` table — see `background-mechanism.md`
 - [x] Migration: `quotes` table — see `background-mechanism.md`
 - [x] Indexes: `quote_jobs_pending_idx`, `quote_jobs_dedup_key_uidx`
@@ -75,13 +83,15 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 
 Refresh-path code, scheduler, real upstream client.
 
-- [x] `RatesProvider` interface (`FetchBatch` only) — see `background-mechanism.md`
-- [ ] `fakeRatesProvider` for tests (configurable map + error injection)
-- [ ] `exchangerateHostProvider` (real implementation; `httptest`-based unit tests)
-- [ ] Worker loop calling `FetchBatch` and upserting `quotes` in one transaction
-- [ ] Scheduler component + bootstrap-on-startup tick
-- [ ] Coalescing: `dedup_key = sha256("<currency>:<bucket>")` on both producers
+- [ ] `RatesProvider` interface (`FetchPairs`, `Pair` type, `FetchResult` keyed by `Pair`, `ProviderError` with `APICode`) — amended in C2 to pair-based shape; see `background-mechanism.md` and `resilience.md`
+- [ ] `fakeRatesProvider` for tests (three modes: success / batch-failure / partial-success-with-missing-pair-synthesis)
+- [ ] `apilayerProvider` (real implementation; per-base HTTP grouping; `httptest`-based unit tests)
+- [ ] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
+- [ ] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
+- [ ] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
 - [ ] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
+- [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
+- [ ] Missing-pair synthesis in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Errors`
 - [ ] All upstream call paths emit metrics + logs through `internal/obs`
 - [ ] Coalescing-collapse counter incremented on `Enqueue` conflicts
 
@@ -96,8 +106,8 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [ ] `internal/api/oapi_gen.go` checked in
 - [ ] `make check` includes `git diff --exit-code` after `go generate`
 - [ ] Handler implementations satisfying generated `ServerInterface`
-- [ ] Currency validation (format → whitelist, two-step) — see `api-contract.md`
-- [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /latest` (`max-age=W`)
+- [ ] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`
+- [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /quotes/latest?base=BASE&quote=QUOTE` (`max-age=W`)
 - [ ] Conditional GET handling (`If-None-Match` → `304`)
 - [ ] Error envelope with stable `code` field
 - [ ] `kin-openapi` runtime validation middleware in dev/test profiles only
@@ -119,10 +129,10 @@ Run-from-zero story for reviewers and operators.
 
 ### Fake rates provider
 
-A standalone binary that imitates `exchangerate.host`. Lets reviewers run the service end-to-end without a paid API key, and lets us simulate plans we cannot buy (Enterprise). Reused in Stage 6 for load testing.
+A standalone binary that imitates the apilayer-family (currencylayer). Lets reviewers run the service end-to-end without a paid API key, and lets us simulate plans we cannot buy (Enterprise). Reused in Stage 6 for load testing.
 
 - [ ] `cmd/fakeprovider/main.go` — separate binary, listens on its own port
-- [ ] HTTP-compatible with `exchangerate.host`: `/live` endpoint, query params (`access_key`, `currencies`, `source`), response shape (`{success, timestamp, source, quotes}`)
+- [ ] HTTP-compatible with apilayer-family (currencylayer): `/live` endpoint, query params (`access_key`, `currencies`, `source`), response shape (`{success, timestamp, source, quotes}` with `success: false` error shape `{success: false, error: {code, info}}`)
 - [ ] Plan simulation via flags / env vars: monthly quota, update cadence, optional latency injection
 - [ ] Random-walk rate generation with deterministic seed (reproducible runs)
 - [ ] **In-memory state only** — restart resets quota counter and current rates

@@ -15,10 +15,10 @@ internal/
     pgqueue/                  # Postgres implementation of JobQueue
     memqueue/                 # in-memory fake for unit tests
     contract_test.go          # shared contract suite, runs against both
-  worker/                     # worker loop: Reserve → FetchBatch → Complete
+  worker/                     # worker loop: Reserve → FetchPairs → Complete
   scheduler/                  # tick-driven producer that enqueues jobs
   ratesprovider/
-    exchangeratehost/         # real upstream client
+    apilayer/                 # real upstream client (apilayer-family: currencylayer, fixer, exchangeratesapi.io)
     fake/                     # in-process fake for unit tests
   obs/                        # logging, metrics, request-id propagation
   config/                     # env-var loading
@@ -51,7 +51,7 @@ Each decision is summarised here in one paragraph and pointed at its source docu
 
 **Worker is the sole writer of `quotes`.** All upstream fetches go through the worker; no other component writes to `quotes`. Eliminates two-writer race conditions. See `discussions/background-mechanism.md`.
 
-**Coalescing on `(currency, bucket)`.** Both producers (refresh handler and scheduler) compute the same `dedup_key`. The unique partial index collapses concurrent enqueues into one job. Bucket size `W` caps the rate of upstream-driven work per currency; actual data freshness is also bounded by provider cadence and failure recovery, see `discussions/idempotency.md`.
+**Coalescing on `(base, quote, bucket)`.** Both producers (refresh handler and scheduler) compute the same `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)`. The unique partial index collapses concurrent enqueues into one job. Bucket size `W` caps the rate of upstream-driven work per pair; actual data freshness is also bounded by provider cadence and failure recovery, see `discussions/idempotency.md`.
 
 **Two independent dials: `T` and `W`.** `T` (scheduler tick) sets the quiet-traffic refresh target; `W` (coalescing window) sets the upstream cost ceiling. Constraint `W ≤ T`. Concrete defaults per tariff plan in `discussions/capacity.md`.
 
@@ -63,7 +63,7 @@ Each decision is summarised here in one paragraph and pointed at its source docu
 
 **Schema-per-test isolation.** Integration tests create their own Postgres schema and drop it on teardown. Tx-rollback is insufficient because we test `FOR UPDATE SKIP LOCKED` semantics across transactions. See `discussions/testing-strategy.md`.
 
-**Single rates provider, multi-provider as Stage 6.** MVP supports one provider via `RatesProvider` interface. Chain-of-providers wrapper is designed but deferred. Circuit breaker also Stage 6 — MVP relies on timeouts + retry budget + token bucket. See `discussions/resilience.md`.
+**Single rates provider, multi-provider as Stage 6.** MVP supports one provider via `RatesProvider` interface. Chain-of-providers wrapper is designed but deferred. Circuit breaker also Stage 6 — MVP relies on timeouts + retry budget + token bucket. See `discussions/resilience.md`. The real provider implementation (`apilayerProvider`) issues one HTTP call per unique base currency within a `FetchPairs` batch.
 
 **Token bucket for upstream quota in Postgres, not in memory.** Multi-instance deployments share the bucket via atomic SQL updates. Restarts do not reset the count. See `discussions/resilience.md`.
 
@@ -76,7 +76,7 @@ Three tables in MVP:
 | Table | Purpose | Writer |
 |---|---|---|
 | `quote_jobs` | operational state of refresh jobs (`pending` / `running` / `done` / `failed`) | refresh handler, scheduler, worker |
-| `quotes` | latest successful rate per currency | worker only |
+| `quotes` | latest successful rate per currency pair | worker only |
 | `upstream_quota` | monthly quota counter per provider | rates provider on each call |
 
 A fourth table, `idempotency_keys`, is designed in `discussions/idempotency.md` for Stage 6 (classical `Idempotency-Key` header support) but not implemented in MVP.

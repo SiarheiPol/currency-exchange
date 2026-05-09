@@ -7,8 +7,8 @@ Decided.
 
 The service exposes three endpoints with different roles:
 
-- `POST /quotes/refresh` and `GET /quotes/:id` are an asynchronous pair: trigger work, then poll for the result.
-- `GET /quotes/latest/:currency` is a synchronous read of the most recent successful quote. It is kept fresh by a background scheduler described in `background-mechanism.md`.
+- `POST /quotes/refresh` and `GET /quotes/:id` are an asynchronous pair: trigger work, then poll for the result. The refresh target is a currency pair `(base, quote)` — both sides are required.
+- `GET /quotes/latest?base=BASE&quote=QUOTE` is a synchronous read of the most recent successful quote for a currency pair. It is kept fresh by a background scheduler described in `background-mechanism.md`.
 
 The HTTP layer here does not perform authentication. `X-Request-Id` is read for tracing if present; otherwise the service generates one.
 
@@ -24,7 +24,7 @@ POST /quotes/refresh HTTP/1.1
 Content-Type: application/json
 X-Request-Id: <optional>
 
-{ "currency": "EUR" }
+{ "base": "EUR", "quote": "MXN" }
 ```
 
 **Response (202 Accepted):**
@@ -39,7 +39,7 @@ Response headers:
 
 The handler returns as soon as the job is durably enqueued. The actual fetch runs in a worker. `202 Accepted` is used because the request was accepted but the result resource is not yet final.
 
-Behavior on repeated requests for the same currency (request coalescing within a window) is described in `idempotency.md`. From a caller's point of view, repeated requests in the same coalescing window receive the same `update_id` and the same response shape — no special handling required.
+Behavior on repeated requests for the same `(base, quote)` pair (request coalescing within a window) is described in `idempotency.md`. From a caller's point of view, repeated requests in the same coalescing window receive the same `update_id` — no special handling required.
 
 ### `GET /quotes/:id`
 
@@ -57,7 +57,8 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
 ```json
 {
   "id":         "9b6e1f3a-...",
-  "currency":   "EUR",
+  "base":       "EUR",
+  "quote":      "MXN",
   "status":     "pending | done | failed",
   "created_at": "2026-04-29T08:00:00Z"
 }
@@ -67,7 +68,8 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
 ```json
 {
   "id":         "9b6e1f3a-...",
-  "currency":   "EUR",
+  "base":       "EUR",
+  "quote":      "MXN",
   "status":     "pending",
   "created_at": "2026-04-29T08:00:00Z",
   "attempts":   1
@@ -78,27 +80,29 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
 ```json
 {
   "id":           "9b6e1f3a-...",
-  "currency":     "EUR",
+  "base":         "EUR",
+  "quote":        "MXN",
   "status":       "done",
   "created_at":   "2026-04-29T08:00:00Z",
   "completed_at": "2026-04-29T08:00:01Z",
-  "price":        1.0834,
+  "price":        20.255648,
   "updated_at":   "2026-04-29T08:00:01Z"
 }
 ```
 
-`updated_at` is the time the rates provider returned the value. Same field as in `GET /quotes/latest/:currency`.
+`price` is in forex convention: `price = 20.255648` means "1 EUR = 20.255648 MXN". `updated_at` is derived from the upstream response `timestamp` field (Unix seconds), not from the local clock.
 
 **`status = failed`:**
 ```json
 {
   "id":           "9b6e1f3a-...",
-  "currency":     "EUR",
+  "base":         "EUR",
+  "quote":        "MXN",
   "status":       "failed",
   "created_at":   "2026-04-29T08:00:00Z",
   "completed_at": "2026-04-29T08:01:30Z",
   "attempts":     5,
-  "error":        { "code": "upstream_unavailable", "message": "rates provider returned 503" }
+  "error":        { "code": "upstream_unavailable", "message": "rates provider returned success:false, api_code=104" }
 }
 ```
 
@@ -130,28 +134,33 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
 
 **Why `private` and not caller-private semantics.** `private` means "do not store in shared caches" — a defensive default for HTTP caches at the BFF/gateway. It is **not** a statement that the response is tied to one caller. Coalescing collapses concurrent refreshes from different callers onto the same `update_id` (see `idempotency.md > Why shared update_id across callers is acceptable`); the response body contains only public rate data. If `quote_jobs` ever grows caller-specific fields, this design must be revisited.
 
-### `GET /quotes/latest/:currency`
+### `GET /quotes/latest?base=BASE&quote=QUOTE`
 
-Returns the last successful quote for a currency. Operational state (pending or failed jobs) is not exposed here; that lives in `GET /quotes/:id`.
+Returns the last successful quote for a currency pair. Operational state (pending or failed jobs) is not exposed here; that lives in `GET /quotes/:id`.
 
 The reason: a caller of `latest` does not have an `update_id` and cannot do anything useful with `pending` or `failed` except re-poll. The freshness signal `updated_at` is enough — each caller applies its own staleness threshold.
 
 **Response (200 OK):**
 ```json
 {
-  "currency":   "EUR",
-  "price":      1.0834,
+  "base":       "EUR",
+  "quote":      "MXN",
+  "price":      20.255648,
   "updated_at": "2026-04-29T08:00:00Z"
 }
 ```
+
+`price` means "1 `base` = `price` `quote`".
 
 **HTTP codes:**
 
 | Situation | Code | Body |
 |---|---|---|
 | Successful quote exists | 200 | as above |
-| Currency is not supported | 400 | error envelope, code `unsupported_currency` |
-| Currency is supported but no successful quote yet | 404 | error envelope, code `no_data` |
+| Either `base` or `quote` is not a supported currency | 400 | error envelope, code `unsupported_currency` |
+| `base == quote` | 400 | error envelope, code `invalid_request` |
+| Either field is missing or malformed | 400 | error envelope, code `invalid_request` |
+| Pair is supported but no successful quote yet | 404 | error envelope, code `no_data` |
 
 The 400 / 404 split is intentional. `400` means "do not retry, change the request". `404` means "no data right now, may appear later".
 
@@ -159,10 +168,12 @@ The 400 / 404 split is intentional. `400` means "do not retry, change the reques
 
 | Situation | `Cache-Control` | `ETag` |
 |---|---|---|
-| 200 | `public, max-age=W` | `"<currency>-<updated_at_unix>"` |
+| 200 | `public, max-age=W` | `"<base>-<quote>-<updated_at_unix>"` |
 | 400 / 404 | `no-store` | — |
 
-**What `W` means in this header.** `W` is the coalescing bucket size from `idempotency.md` — the **minimum interval between upstream-driven refresh work** per currency. It bounds how often `quotes.updated_at` can advance under active client traffic.
+`public` is correct because the response is not tied to a caller. A shared cache at the BFF or gateway can serve it.
+
+**What `W` means in this header.** `W` is the coalescing bucket size from `idempotency.md` — the **minimum interval between upstream-driven refresh work** per pair. It bounds how often `quotes.updated_at` can advance under active client traffic.
 
 Note: `W` is **not** an absolute upper bound on data staleness. Three other factors influence actual freshness:
 
@@ -174,22 +185,21 @@ We use `W` for `max-age` because under active traffic it is the rate at which cl
 
 The `max-age` value must come from the same configuration variable as the coalescing window. With `W=30s` this gives `max-age=30`. After `max-age` expires, downstream caches use conditional GET with `If-None-Match: ETag`; the service returns `304 Not Modified` cheaply if the underlying row has not changed.
 
-`public` is correct because the response is not tied to a caller. A shared cache at the BFF or gateway can serve it.
-
 We do not use `stale-while-revalidate`. It would let caches serve stale responses for an extra window while async-revalidating, which extends the staleness boundary beyond `W`. For an MVP that is consumed mostly by internal services, the small latency win is not worth the added confusion.
 
 A formal **freshness SLI** for `/latest` is in `monitoring.md > SLO and SLI thinking`.
 
 ## Common rules
 
-### Currency validation
+### Pair validation
 
-Validated the same way in the request body of `POST /quotes/refresh` and in the path of `GET /quotes/latest/:currency`:
+Validated the same way in the request body of `POST /quotes/refresh` and in the query parameters of `GET /quotes/latest?base=BASE&quote=QUOTE`:
 
-1. **Format check first.** Exactly three ASCII uppercase letters. Otherwise `400 invalid_request`.
-2. **Whitelist check second.** Must be one of `USD`, `EUR`, `MXN`. Otherwise `400 unsupported_currency`.
+1. **Format check first.** Each field (`base` and `quote`) must be exactly three ASCII uppercase letters. Otherwise `400 invalid_request`.
+2. **Whitelist check second.** Both must be one of `USD`, `EUR`, `MXN`. Otherwise `400 unsupported_currency`.
+3. **Self-pair check third.** `base` must not equal `quote` (e.g., `base=EUR&quote=EUR` is rejected). Error code `invalid_request`, message "base and quote must differ".
 
-The order matters: `jpy` fails on format, `JPY` fails on whitelist. Two distinct error codes for two distinct mistakes.
+The order matters: `eur` fails on format, `JPY` fails on whitelist, `EUR/EUR` fails on self-pair check. Three distinct error codes / messages for three distinct mistakes.
 
 ### Headers we read
 
@@ -202,7 +212,7 @@ The order matters: `jpy` fails on format, `JPY` fails on whitelist. Two distinct
 
 - `Content-Type: application/json` on every response with a body.
 - `Cache-Control` on every response.
-- `ETag` on terminal `GET /quotes/:id` (done, failed) and on `200` of `GET /quotes/latest/:currency`.
+- `ETag` on terminal `GET /quotes/:id` (done, failed) and on `200` of `GET /quotes/latest?base=BASE&quote=QUOTE`.
 - `X-Request-Id` echoed back (the value the caller sent, or the one the service generated).
 
 ### Error envelope
@@ -218,7 +228,7 @@ All non-2xx responses use the same shape:
 }
 ```
 
-Codes used so far: `invalid_request`, `unsupported_currency`, `no_data`, `not_found`, `upstream_unavailable`, `internal`. New codes are added per endpoint as needed. `message` is for humans; clients should branch on `code`.
+Codes used so far: `invalid_request`, `unsupported_currency`, `no_data`, `not_found`, `upstream_unavailable`, `internal`. `unsupported_currency` is returned when either side of the requested pair is outside the whitelist. New codes are added per endpoint as needed. `message` is for humans; clients should branch on `code`.
 
 ## Edge case matrix (test seeds)
 
@@ -226,30 +236,34 @@ One row, one handler test case.
 
 | # | Endpoint | Input | Expected | Notes |
 |---|---|---|---|---|
-|  1 | POST /quotes/refresh | `{"currency":"EUR"}` | 202 | `id` is a fresh UUID, `Location` set |
-|  2 | POST /quotes/refresh | `{"currency":"JPY"}` | 400 | `unsupported_currency` |
-|  3 | POST /quotes/refresh | `{"currency":"jpy"}` | 400 | `invalid_request` (format) |
-|  4 | POST /quotes/refresh | `{"currency":"EU"}` | 400 | `invalid_request` (format) |
-|  5 | POST /quotes/refresh | empty body | 400 | `invalid_request` |
-|  6 | POST /quotes/refresh | non-JSON body | 400 | `invalid_request` |
-|  7 | POST /quotes/refresh | missing `Content-Type` | 400 | `invalid_request` |
-|  8 | GET /quotes/:id | unknown valid UUID | 404 | `not_found` |
-|  9 | GET /quotes/:id | malformed UUID | 400 | `invalid_request` |
-| 10 | GET /quotes/:id | pending job | 200 + `status=pending` | `Cache-Control: no-store` |
-| 11 | GET /quotes/:id | done job | 200 + `status=done` | `ETag` set, `immutable` |
-| 12 | GET /quotes/:id | failed job | 200 + `status=failed` | `ETag` set |
-| 13 | GET /quotes/:id | done job, `If-None-Match` matches | 304 | no body |
-| 14 | GET /quotes/latest/:currency | `EUR` with quote | 200 | `public`, `ETag` set |
-| 15 | GET /quotes/latest/:currency | `EUR` without quote | 404 | `no_data` |
-| 16 | GET /quotes/latest/:currency | `JPY` | 400 | `unsupported_currency` |
-| 17 | GET /quotes/latest/:currency | `eur` | 400 | `invalid_request` |
-| 18 | GET /quotes/latest/:currency | `EUR`, `If-None-Match` matches | 304 | no body |
-| 19 | any | server bug (panic, DB down) | 500 | `internal`, no leaked details |
-| 20 | any | request without `X-Request-Id` | normal status | service-generated id in logs and echo |
+| 1 | POST /quotes/refresh | `{"base":"EUR","quote":"MXN"}` | 202 | `id` is a fresh UUID, `Location` set |
+| 2 | POST /quotes/refresh | `{"base":"JPY","quote":"MXN"}` | 400 | `unsupported_currency` (JPY not in whitelist) |
+| 3 | POST /quotes/refresh | `{"base":"eur","quote":"MXN"}` | 400 | `invalid_request` (format: lowercase) |
+| 4 | POST /quotes/refresh | `{"base":"EU","quote":"MXN"}` | 400 | `invalid_request` (format: length) |
+| 5 | POST /quotes/refresh | `{"base":"EUR","quote":"EUR"}` | 400 | `invalid_request` (self-pair) |
+| 6 | POST /quotes/refresh | `{"base":"EUR"}` (missing quote) | 400 | `invalid_request` |
+| 7 | POST /quotes/refresh | empty body | 400 | `invalid_request` |
+| 8 | POST /quotes/refresh | non-JSON body | 400 | `invalid_request` |
+| 9 | POST /quotes/refresh | missing `Content-Type` | 400 | `invalid_request` |
+| 10 | GET /quotes/:id | unknown valid UUID | 404 | `not_found` |
+| 11 | GET /quotes/:id | malformed UUID | 400 | `invalid_request` |
+| 12 | GET /quotes/:id | pending job | 200 + `status=pending` | `Cache-Control: no-store` |
+| 13 | GET /quotes/:id | done job | 200 + `status=done` | `ETag` set, `immutable` |
+| 14 | GET /quotes/:id | failed job | 200 + `status=failed` | `ETag` set |
+| 15 | GET /quotes/:id | done job, `If-None-Match` matches | 304 | no body |
+| 16 | GET /quotes/latest | `base=EUR&quote=MXN` with quote | 200 | `public`, `ETag` set |
+| 17 | GET /quotes/latest | `base=EUR&quote=MXN`, no data yet | 404 | `no_data` |
+| 18 | GET /quotes/latest | `base=JPY&quote=MXN` | 400 | `unsupported_currency` |
+| 19 | GET /quotes/latest | `base=eur&quote=MXN` | 400 | `invalid_request` |
+| 20 | GET /quotes/latest | `base=EUR&quote=EUR` | 400 | `invalid_request` (self-pair) |
+| 21 | GET /quotes/latest | `base=EUR` (missing quote) | 400 | `invalid_request` |
+| 22 | GET /quotes/latest | `base=EUR&quote=MXN`, `If-None-Match` matches | 304 | no body |
+| 23 | any | server bug (panic, DB down) | 500 | `internal`, no leaked details |
+| 24 | any | request without `X-Request-Id` | normal status | service-generated id in logs and echo |
 
 ## Not in scope here
 
-- Coalescing rules for `POST /quotes/refresh` (window `W`, dedup key, behavior on duplicates). See `idempotency.md`.
+- Coalescing rules for `POST /quotes/refresh` (window `W`, dedup key derivation, behavior on duplicates). See `idempotency.md`.
 - Classical idempotency via `Idempotency-Key` header (Stage 6 extension). See `idempotency.md`.
 - OpenAPI / Swagger source of truth. See `openapi.md`.
 - Per-endpoint rate limits and authentication concerns. Out of scope for this service.
