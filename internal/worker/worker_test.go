@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/idgen"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 	"currency-exchange/internal/queue/memqueue"
 	"currency-exchange/internal/worker"
@@ -111,6 +113,50 @@ func TestWorker_CallsRecoverExpired(t *testing.T) {
 // TestWorker_ReschedulesOnProcessError is deferred to Stage 3.
 // processJob is a stub (returns nil) in the skeleton; there is no seam
 // to inject a process error until RatesProvider is wired in Stage 3.
+
+// TestWorker_InstrumentsLifecycle asserts the worker advances the right
+// metric counters during a single happy-path job execution. Verifies two
+// regressions worth catching: WorkerIterationsTotal not advancing (loop
+// liveness alert breaks) and QuoteJobsTotal{done} not advancing (terminal-
+// state accounting breaks).
+//
+// NOT t.Parallel'd: counters are global singletons; running concurrently
+// with TestWorker_ReservesAndCompletesJob (parallel) would also bump
+// QuoteJobsTotal{done}, breaking the exact +1 delta. As a non-parallel
+// top-level test it runs in the serial phase before the parallel batch.
+func TestWorker_InstrumentsLifecycle(t *testing.T) {
+	clk := clock.NewFake(time.Now())
+	q := memqueue.New(clk)
+
+	gen := idgen.NewSeq()
+	_, _, err := q.Enqueue(context.Background(), queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Currency:  "EUR",
+		NextRunAt: clk.Now(),
+	})
+	require.NoError(t, err)
+
+	w := worker.New(q, q, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithCleanInterval(1*time.Second), // keep clean out of the way
+		worker.WithBatchSize(1),
+	)
+
+	okBefore := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("ok"))
+	doneBefore := testutil.ToFloat64(obs.QuoteJobsTotal.WithLabelValues("done"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	okAfter := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("ok"))
+	doneAfter := testutil.ToFloat64(obs.QuoteJobsTotal.WithLabelValues("done"))
+
+	require.Greater(t, okAfter, okBefore,
+		"WorkerIterationsTotal{outcome=ok} should advance during the run")
+	require.Equal(t, doneBefore+1, doneAfter,
+		"QuoteJobsTotal{status=done} should advance by exactly 1 (one job completed)")
+}
 
 // TestWorker_LastIterationUpdates asserts the worker exposes a heartbeat
 // (LastIteration time) that starts at zero, becomes non-zero once Run has

@@ -14,4 +14,5 @@ const (
 	EvUpstreamCallStarted  = "upstream call started"
 	EvUpstreamCallFinished = "upstream call finished"
 	EvCoalescingCollapsed  = "coalescing collapsed"
+	EvWorkerOpFailed       = "worker operation failed"
 )

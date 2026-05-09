@@ -99,3 +99,13 @@ func LogCoalescingCollapsed(ctx context.Context, currency, dedupKey string) {
 		slog.String("dedup_key", dedupKey),
 	)
 }
+
+// LogWorkerOpFailed logs an error from one of the worker's queue operations
+// (reserve, complete, reschedule, fail, recover_expired). The op attribute
+// lets a single dashboard row break out failures by operation.
+func LogWorkerOpFailed(ctx context.Context, op string, err error) {
+	Logger(ctx).LogAttrs(ctx, slog.LevelError, EvWorkerOpFailed,
+		slog.String("op", op),
+		slog.String("error", err.Error()),
+	)
+}

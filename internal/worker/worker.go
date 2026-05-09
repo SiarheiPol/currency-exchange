@@ -5,13 +5,12 @@ package worker
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"sync/atomic"
 	"time"
 
 	"currency-exchange/internal/backoff"
 	"currency-exchange/internal/clock"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 )
 
@@ -95,31 +94,50 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.lastIterationUnixNano.Store(time.Now().UnixNano())
 			jobs, err := w.q.Reserve(ctx, w.batchSize, w.leaseTime)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "worker: reserve error: %v\n", err)
+				obs.LogWorkerOpFailed(ctx, "reserve", err)
+				obs.WorkerIterationsTotal.WithLabelValues("error").Inc()
 				continue
 			}
+			obs.WorkerIterationsTotal.WithLabelValues("ok").Inc()
 			for _, job := range jobs {
-				if err := w.processJob(ctx, job); err != nil {
+				obs.LogJobReserved(ctx, string(job.ID), job.Currency)
+				startedAt := time.Now()
+				if perr := w.processJob(ctx, job); perr != nil {
+					attempts := job.Attempts + 1
 					if job.Attempts < w.maxAttempts {
 						delay := backoff.Compute(job.Attempts)
-						if rErr := w.q.Reschedule(ctx, job.ID, err.Error(), delay); rErr != nil {
-							fmt.Fprintf(os.Stderr, "worker: reschedule error: %v\n", rErr)
+						if rErr := w.q.Reschedule(ctx, job.ID, perr.Error(), delay); rErr != nil {
+							obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
+						} else {
+							obs.LogJobRescheduled(ctx, string(job.ID), job.Currency, attempts, delay)
 						}
 					} else {
-						if fErr := w.q.Fail(ctx, job.ID, err.Error()); fErr != nil {
-							fmt.Fprintf(os.Stderr, "worker: fail error: %v\n", fErr)
+						if fErr := w.q.Fail(ctx, job.ID, perr.Error()); fErr != nil {
+							obs.LogWorkerOpFailed(ctx, "fail", fErr)
+						} else {
+							obs.LogJobFailed(ctx, string(job.ID), job.Currency, attempts, perr)
+							obs.QuoteJobsTotal.WithLabelValues("failed").Inc()
+							obs.QuoteJobsAttempts.Observe(float64(attempts))
 						}
 					}
 				} else {
 					if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
-						fmt.Fprintf(os.Stderr, "worker: complete error: %v\n", cErr)
+						obs.LogWorkerOpFailed(ctx, "complete", cErr)
+					} else {
+						attempts := job.Attempts + 1
+						obs.LogJobCompleted(ctx, string(job.ID), job.Currency, time.Since(startedAt))
+						obs.QuoteJobsTotal.WithLabelValues("done").Inc()
+						obs.QuoteJobsAttempts.Observe(float64(attempts))
 					}
 				}
 			}
 		case <-cleanTicker.C:
 			w.lastIterationUnixNano.Store(time.Now().UnixNano())
 			if _, err := w.cleaner.RecoverExpired(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "worker: recover expired error: %v\n", err)
+				obs.LogWorkerOpFailed(ctx, "recover_expired", err)
+				obs.WorkerIterationsTotal.WithLabelValues("error").Inc()
+			} else {
+				obs.WorkerIterationsTotal.WithLabelValues("ok").Inc()
 			}
 		case <-ctx.Done():
 			return ctx.Err()
