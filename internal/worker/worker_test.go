@@ -111,3 +111,30 @@ func TestWorker_CallsRecoverExpired(t *testing.T) {
 // TestWorker_ReschedulesOnProcessError is deferred to Stage 3.
 // processJob is a stub (returns nil) in the skeleton; there is no seam
 // to inject a process error until RatesProvider is wired in Stage 3.
+
+// TestWorker_LastIterationUpdates asserts the worker exposes a heartbeat
+// (LastIteration time) that starts at zero, becomes non-zero once Run has
+// observed a tick, and is recent. The /readyz worker check depends on this.
+func TestWorker_LastIterationUpdates(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Now())
+	q := memqueue.New(clk)
+	w := worker.New(q, q, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithCleanInterval(1*time.Millisecond),
+	)
+
+	require.True(t, w.LastIteration().IsZero(),
+		"before Run: LastIteration should be zero")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	last := w.LastIteration()
+	require.False(t, last.IsZero(),
+		"after Run: LastIteration should be set by at least one tick")
+	require.WithinDuration(t, time.Now(), last, 500*time.Millisecond,
+		"LastIteration should be recent (within 500ms of now)")
+}

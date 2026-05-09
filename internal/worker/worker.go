@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"currency-exchange/internal/backoff"
@@ -27,6 +28,12 @@ type Worker struct {
 	maxAttempts   int
 	batchSize     int
 	cleanInterval time.Duration
+
+	// lastIterationUnixNano stores the wall-clock time of the most recent loop
+	// iteration as Unix nanoseconds. Updated on every poll-tick or clean-tick;
+	// read by /readyz' worker checker via LastIteration. atomic.Int64 keeps
+	// the read/write race-free without a mutex.
+	lastIterationUnixNano atomic.Int64
 }
 
 // WithPollInterval sets the interval between queue polls.
@@ -85,6 +92,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-pollTicker.C:
+			w.lastIterationUnixNano.Store(time.Now().UnixNano())
 			jobs, err := w.q.Reserve(ctx, w.batchSize, w.leaseTime)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "worker: reserve error: %v\n", err)
@@ -109,6 +117,7 @@ func (w *Worker) Run(ctx context.Context) error {
 				}
 			}
 		case <-cleanTicker.C:
+			w.lastIterationUnixNano.Store(time.Now().UnixNano())
 			if _, err := w.cleaner.RecoverExpired(ctx); err != nil {
 				fmt.Fprintf(os.Stderr, "worker: recover expired error: %v\n", err)
 			}
@@ -122,4 +131,15 @@ func (w *Worker) Run(ctx context.Context) error {
 // returns nil; it will be wired to a RatesProvider in Stage 3.
 func (w *Worker) processJob(_ context.Context, _ queue.Job) error {
 	return nil
+}
+
+// LastIteration returns the wall-clock time of the most recent loop iteration,
+// or the zero time if Run has not yet observed a tick. Used by the /readyz
+// worker checker to detect a stalled worker. Safe for concurrent use.
+func (w *Worker) LastIteration() time.Time {
+	ns := w.lastIterationUnixNano.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
