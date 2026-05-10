@@ -83,7 +83,7 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 
 Refresh-path code, scheduler, real upstream client.
 
-- [ ] `RatesProvider` interface (`FetchPairs`, `Pair` type, `FetchResult` keyed by `Pair`, `ProviderError` with `APICode`) — amended in C2 to pair-based shape; see `background-mechanism.md` and `resilience.md`
+- [x] `RatesProvider` interface (`FetchPairs`, `Pair` type, `FetchResult` keyed by `Pair`, `ProviderError` with `APICode`) — amended in C2 to pair-based shape; see `background-mechanism.md` and `resilience.md`
 - [ ] `fakeRatesProvider` for tests (three modes: success / batch-failure / partial-success-with-missing-pair-synthesis)
 - [ ] `apilayerProvider` (real implementation; per-base HTTP grouping; `httptest`-based unit tests)
 - [ ] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
