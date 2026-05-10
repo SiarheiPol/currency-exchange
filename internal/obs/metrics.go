@@ -168,9 +168,13 @@ func init() {
 	}, []string{"status"})
 	QuoteJobsTotal.WithLabelValues("")
 
+	// Integer-shaped buckets: jobs use 1..maxAttempts (default 5), with 10 as
+	// the overflow boundary. Default Prometheus buckets are seconds-shaped and
+	// would conflate 2/3 attempts and 4/5 attempts into the same bucket.
 	QuoteJobsAttempts = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: MetricQuoteJobsAttempts,
-		Help: "Number of delivery attempts per quote job.",
+		Name:    MetricQuoteJobsAttempts,
+		Help:    "Number of delivery attempts per quote job.",
+		Buckets: []float64{1, 2, 3, 4, 5, 10},
 	})
 
 	WorkerIterationsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
