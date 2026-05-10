@@ -83,7 +83,7 @@ When `RatesProvider.FetchPairs` returns an error, the worker maps it to one of t
 | `success: false`, API codes 101/102/103/105/106 (auth, access) | permanent | fail job; alert ops |
 | `success: false`, API codes 201/202/404 (invalid query) | permanent | fail job; log full response |
 | `success: false`, unrecognised code | permanent | fail job; log for diagnosis |
-| `success: true`, requested pair absent from response (silent drop) | synthesised per-pair `ProviderError` | treat as permanent for that pair; fail job |
+| `success: true`, requested pair absent from response (silent drop) | pair appears in `FetchResult.Missing` | treat as permanent for that pair; fail job |
 | Malformed JSON or `success` field absent | transient | reschedule (backoff) |
 | Unknown 4xx at HTTP level | permanent | fail job; log full response for diagnosis |
 

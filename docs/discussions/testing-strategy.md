@@ -90,20 +90,20 @@ Every external dependency goes through an interface. Each interface has a real i
 | Interface | Real | Fake |
 |---|---|---|
 | `JobQueue` | `pgQueue` (Postgres) | `memQueue` (sync map) |
-| `RatesProvider` | `apilayerProvider` | `fakeRatesProvider` (three modes: success / batch-failure / partial-success-with-missing-pair-synthesis) |
+| `RatesProvider` | `apilayerProvider` | `fakeRatesProvider` (three test patterns: success / batch-failure / partial-success with missing-pair detection) |
 | `Clock` | `realClock` (`time.Now`) | `fakeClock` (advanced manually in tests) |
 | `IDGenerator` | `uuidGenerator` (`uuid.New`) | `seqIDGenerator` (deterministic counter) |
 | `QuoteRepo` (read side for `/latest`) | `pgQuoteRepo` | `memQuoteRepo` |
 
 `Clock` and `IDGenerator` look like overkill, but they make bucket-math and id-equality tests deterministic. Without them, every `time.Now()` and `uuid.New()` call sneaks non-determinism into tests.
 
-**`fakeRatesProvider` modes:**
+**`fakeRatesProvider` test patterns:**
 
-1. **Success mode.** Returns pre-configured `FetchResult.Quotes` for every requested pair. Used in happy-path worker and scheduler tests.
-2. **Batch-failure mode.** Returns a non-nil `error` (simulates network failure, auth error, quota exhaustion). All reserved jobs will be rescheduled or failed by the worker.
-3. **Partial-success-with-missing-pair-synthesis mode.** Returns `FetchResult` where some pairs are in `Quotes` and others are synthesised as `Errors` (simulating silent drop of a requested pair). Tests the worker's per-pair error dispatch path — this is the **primary error path** given empirically confirmed silent-drop behaviour.
+1. **Success.** Returns pre-configured `FetchResult.Quotes` covering every requested pair; `Missing` is empty. Used in happy-path worker and scheduler tests.
+2. **Batch-failure.** Returns a typed `*ProviderError` as the Go `error` (simulates network failure, auth error, quota exhaustion). All reserved jobs will be rescheduled or failed by the worker according to `ProviderError.IsTransient()`.
+3. **Partial-success with missing-pair detection.** Returns `FetchResult` where some pairs are in `Quotes` and the rest appear in `Missing` (simulating silent drop of a requested pair by the upstream). Tests the worker's permanent-fail dispatch path for missing pairs — this is the **primary error path** given empirically confirmed silent-drop behaviour.
 
-The fake is configured per-test, not globally. Each test sets exactly the mode it needs.
+The fake is configured per-test, not globally. Each test sets exactly the pattern it needs.
 
 ## What we test
 

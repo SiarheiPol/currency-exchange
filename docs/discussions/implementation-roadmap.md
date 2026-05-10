@@ -83,15 +83,16 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
 
 Refresh-path code, scheduler, real upstream client.
 
-- [x] `RatesProvider` interface (`FetchPairs`, `Pair` type, `FetchResult` keyed by `Pair`, `ProviderError` with `APICode`) — amended in C2 to pair-based shape; see `background-mechanism.md` and `resilience.md`
-- [ ] `fakeRatesProvider` for tests (three modes: success / batch-failure / partial-success-with-missing-pair-synthesis)
+- [x] `RatesProvider` interface (`FetchPairs`, `Pair` type, `FetchResult` keyed by `Pair`, `ProviderError` with `APICode`) — amended in C2 to pair-based shape; amended in C3 to replace `Errors map` with `Missing []Pair`; see `background-mechanism.md`, `resilience.md`, and `fetchresult-missing-pairs.md`
+- [ ] `FetchResult.Missing` refactor: replace `Errors map[Pair]*ProviderError` with `Missing []Pair` in `provider.go`; update interface godoc — see `fetchresult-missing-pairs.md`
+- [ ] `fakeRatesProvider` for tests (three test patterns: success / batch-failure / partial-success with missing-pair detection)
 - [ ] `apilayerProvider` (real implementation; per-base HTTP grouping; `httptest`-based unit tests)
 - [ ] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
 - [ ] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
 - [ ] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
 - [ ] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
 - [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
-- [ ] Missing-pair synthesis in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Errors`
+- [ ] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
 - [ ] All upstream call paths emit metrics + logs through `internal/obs`
 - [ ] Coalescing-collapse counter incremented on `Enqueue` conflicts
 

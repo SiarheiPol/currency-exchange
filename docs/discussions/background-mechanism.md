@@ -169,8 +169,8 @@ type Pair struct {
 }
 
 type FetchResult struct {
-    Quotes map[Pair]Quote          // successfully fetched per pair
-    Errors map[Pair]*ProviderError // per-pair errors (nil map if none)
+    Quotes  map[Pair]Quote // successfully fetched per pair
+    Missing []Pair         // pairs the upstream did not return (nil if none)
 }
 
 type RatesProvider interface {
@@ -181,13 +181,13 @@ type RatesProvider interface {
 The return shape is **per-pair**, not all-or-nothing. Three result categories:
 
 - `result.Quotes[pair]` populated → success for that pair.
-- `result.Errors[pair]` populated → that one pair failed. The **primary error path** is a missing pair synthesised by our client: when `apilayerProvider` calls `source=EUR&currencies=MXN,USD`, a silent drop of `MXN` by the upstream is detected by comparing the requested pairs against the returned quote keys; missing pairs produce a `ProviderError` in `result.Errors`. This is the dominant failure mode (empirically confirmed: invalid codes are silently dropped, not rejected with code 202).
+- `pair` listed in `result.Missing` → the upstream did not return that pair. The **primary error path** is a silent drop by the upstream: when `apilayerProvider` calls `source=EUR&currencies=MXN,USD`, a silent drop of `MXN` is detected by comparing the requested pairs against the returned quote keys; absent pairs are appended to `result.Missing`. This is the dominant failure mode (empirically confirmed: invalid codes are silently dropped, not rejected with code 202). There is no per-pair error classification at the API protocol level.
 - `err` non-nil → the entire batch call failed (network error, malformed response, auth failure, quota exhaustion, etc.).
 
 The worker handles each category:
 - For each `pair` in `result.Quotes`: upsert to `quotes`, `Complete` the corresponding job.
-- For each `pair` in `result.Errors`: classify per `ProviderError.IsTransient()` and `Reschedule` or `Fail` that job individually.
-- If the whole batch returned `err`: classify and reschedule/fail all reserved jobs.
+- For each `pair` in `result.Missing`: `Fail` that job as permanent — the upstream cannot supply this pair.
+- If the whole batch returned `err`: classify the typed `*ProviderError` per `IsTransient()` and reschedule/fail all reserved jobs.
 
 There is no cross-rate derivation. `EUR/MXN` is fetched directly from upstream (`source=EUR&currencies=MXN`) because reciprocal and cross-rate computation introduces measurable error (empirically: 5×10⁻⁷ to 6×10⁻⁶ divergence).
 
