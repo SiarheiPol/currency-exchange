@@ -52,6 +52,23 @@ func TestProviderError_Error_APICode(t *testing.T) {
 	}
 }
 
+// TestFetchResult_MissingField_CompilesAndHoldsCorrectType verifies that
+// FetchResult has a Missing field of type []Pair, and that individual Pair
+// elements within it are addressable with the correct Base/Quote strings.
+// This test is intentionally structural: the compile-time presence of the
+// field with the right element type is the genuine RED→GREEN delta for the
+// Errors→Missing rename.
+func TestFetchResult_MissingField_CompilesAndHoldsCorrectType(t *testing.T) {
+	t.Parallel()
+
+	result := ratesprovider.FetchResult{
+		Missing: []ratesprovider.Pair{{Base: "USD", Quote: "MXN"}},
+	}
+
+	require.Equal(t, "USD", result.Missing[0].Base)
+	require.Equal(t, "MXN", result.Missing[0].Quote)
+}
+
 // TestProviderError_IsTransient verifies the two-code allowlist: only
 // "transient" and "quota_exceeded" return true; all other values (including
 // the empty string and unknown strings) return false.

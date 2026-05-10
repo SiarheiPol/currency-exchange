@@ -39,16 +39,24 @@ type FetchResult struct {
 	// Quotes holds successfully fetched exchange rates, keyed by Pair.
 	// Nil or empty when no pair succeeded.
 	Quotes map[Pair]Quote
-	// Errors holds per-pair failures synthesised or reported by the provider.
-	// Nil or empty when every requested pair succeeded.
-	Errors map[Pair]*ProviderError
+	// Missing lists every pair from the caller's input slice that is absent
+	// from Quotes. Entries are deduplicated — at most one entry per unique
+	// Pair, regardless of input duplicates. Order is unspecified; callers
+	// needing deterministic order must sort. Nil when every requested pair
+	// appears in Quotes.
+	//
+	// The apilayer-family of providers silently drops unsupported currency
+	// codes from their response rather than reporting them as errors, which
+	// is the primary reason this field exists.
+	Missing []Pair
 }
 
 // RatesProvider is the interface any upstream exchange-rate source must implement.
 type RatesProvider interface {
 	// FetchPairs fetches exchange rates for the given pairs in as few round-trips
 	// as the provider supports. A non-nil error is returned only for failures that
-	// affect the entire call. Per-pair failures are communicated via FetchResult.Errors.
+	// affect the entire call. Pairs that the upstream did not return are listed in
+	// FetchResult.Missing.
 	FetchPairs(ctx context.Context, pairs []Pair) (FetchResult, error)
 }
 
