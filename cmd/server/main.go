@@ -3,15 +3,16 @@
 // Bootstrap order on startup:
 //  1. Logging — JSON handler set as slog default.
 //  2. Postgres pool — pgxpool.New, then Ping. Failure here aborts startup.
-//  3. Worker — pgqueue + worker.Run in a goroutine, ctx cancelled on shutdown.
-//  4. HTTP server — /healthz, /metrics, /readyz mounted; RequestID middleware.
+//  3. Startup probe — apilayer.Provider.FetchPairs([{USD,EUR}]) sanity check.
+//  4. Worker — pgqueue + worker.Run in a goroutine, ctx cancelled on shutdown.
+//  5. Scheduler — scheduler.Run in a goroutine, ticks the queue from the whitelist.
+//  6. HTTP server — /healthz, /metrics, /readyz mounted; RequestID middleware.
 //
 // Shutdown order on SIGINT/SIGTERM:
 //
-//	HTTP (Shutdown) → worker (ctx cancel + drain) → pool.Close.
+//	HTTP (Shutdown) → scheduler (ctx cancel + drain) → worker (ctx cancel + drain) → pool.Close.
 //
-// This is the order from docs/discussions/implementation-roadmap.md Stage 5;
-// scheduler will slot between HTTP and worker when it lands.
+// This is the order from docs/discussions/implementation-roadmap.md Stage 5.
 package main
 
 import (
@@ -30,10 +31,12 @@ import (
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/health"
 	"currency-exchange/internal/httpmw"
+	"currency-exchange/internal/idgen"
 	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue/pgqueue"
 	"currency-exchange/internal/quoterepo/pgquoterepo"
 	"currency-exchange/internal/ratesprovider/apilayer"
+	"currency-exchange/internal/scheduler"
 	"currency-exchange/internal/startup"
 	"currency-exchange/internal/worker"
 )
@@ -103,12 +106,36 @@ func run() error {
 		}
 	}()
 
+	schedHeartbeatThreshold := 6 * cfg.SchedulerTickInterval
+	sched := scheduler.New(
+		scheduler.WithInterval(cfg.SchedulerTickInterval),
+		scheduler.WithBucketSize(cfg.CoalescingWindow),
+		scheduler.WithPairs(expandWhitelist(cfg.WhitelistCurrencies)),
+		scheduler.WithQueue(q),
+		scheduler.WithClock(clk),
+		scheduler.WithIDGen(idgen.New()),
+	)
+
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	schedDone := make(chan struct{})
+	go func() {
+		defer close(schedDone)
+		obs.Logger(schedCtx).Info(obs.EvSchedulerStarted)
+		if err := sched.Run(schedCtx); err != nil && !errors.Is(err, context.Canceled) {
+			obs.Logger(schedCtx).Error(obs.EvSchedulerExitedUnexpectedly, "error", err)
+			stop()
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Healthz())
 	mux.Handle("GET /metrics", obs.MetricsHandler())
 	mux.Handle("GET /readyz", health.Readyz(
 		[]health.Checker{health.PostgresChecker(pool)},
-		[]health.Checker{health.WorkerChecker(w, workerHeartbeatThreshold)},
+		[]health.Checker{
+			health.WorkerChecker(w, workerHeartbeatThreshold),
+			health.SchedulerChecker(sched, schedHeartbeatThreshold),
+		},
 	))
 
 	srv := &http.Server{
@@ -131,6 +158,8 @@ func run() error {
 	case <-rootCtx.Done():
 		obs.Logger(context.Background()).Info("shutdown signal received")
 	case err := <-serverErr:
+		schedCancel()
+		<-schedDone
 		workerCancel()
 		<-workerDone
 		return fmt.Errorf("http server: %w", err)
@@ -143,7 +172,15 @@ func run() error {
 		obs.Logger(context.Background()).Error("http shutdown failed", "error", err)
 	}
 
-	// 2. Stop the worker and wait for it to drain.
+	// 2. Stop the scheduler and wait for it to drain.
+	schedCancel()
+	select {
+	case <-schedDone:
+	case <-time.After(10 * time.Second):
+		obs.Logger(context.Background()).Warn(obs.EvSchedulerStopTimeout)
+	}
+
+	// 3. Stop the worker and wait for it to drain.
 	workerCancel()
 	select {
 	case <-workerDone:
@@ -151,7 +188,7 @@ func run() error {
 		obs.Logger(context.Background()).Warn("worker did not stop within 10s")
 	}
 
-	// 3. pool.Close runs via defer on return.
+	// 4. pool.Close runs via defer on return.
 	return nil
 }
 

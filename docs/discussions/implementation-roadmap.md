@@ -125,7 +125,7 @@ Run-from-zero story for reviewers and operators.
 
 - [ ] `Dockerfile` (multi-stage, distroless or scratch final)
 - [ ] Configuration via env vars (DSN, `T`, `W`, provider URL, provider key, `K`, etc.)
-- [ ] Graceful shutdown wired in order: HTTP → scheduler → worker → exit
+- [x] Graceful shutdown wired in order: HTTP → scheduler → worker → exit
 - [ ] `README.md` with build/run instructions, env vars, endpoints
 
 ### Fake rates provider
