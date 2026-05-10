@@ -100,7 +100,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			obs.WorkerIterationsTotal.WithLabelValues("ok").Inc()
 			for _, job := range jobs {
-				obs.LogJobReserved(ctx, string(job.ID), job.Currency)
+				obs.LogJobReserved(ctx, string(job.ID), job.Base, job.Quote)
 				startedAt := time.Now()
 				if perr := w.processJob(ctx, job); perr != nil {
 					attempts := job.Attempts + 1
@@ -109,13 +109,13 @@ func (w *Worker) Run(ctx context.Context) error {
 						if rErr := w.q.Reschedule(ctx, job.ID, perr.Error(), delay); rErr != nil {
 							obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
 						} else {
-							obs.LogJobRescheduled(ctx, string(job.ID), job.Currency, attempts, delay)
+							obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, delay)
 						}
 					} else {
 						if fErr := w.q.Fail(ctx, job.ID, perr.Error()); fErr != nil {
 							obs.LogWorkerOpFailed(ctx, "fail", fErr)
 						} else {
-							obs.LogJobFailed(ctx, string(job.ID), job.Currency, attempts, perr)
+							obs.LogJobFailed(ctx, string(job.ID), job.Base, job.Quote, attempts, perr)
 							obs.QuoteJobsTotal.WithLabelValues("failed").Inc()
 							obs.QuoteJobsAttempts.Observe(float64(attempts))
 						}
@@ -125,7 +125,7 @@ func (w *Worker) Run(ctx context.Context) error {
 						obs.LogWorkerOpFailed(ctx, "complete", cErr)
 					} else {
 						attempts := job.Attempts + 1
-						obs.LogJobCompleted(ctx, string(job.ID), job.Currency, time.Since(startedAt))
+						obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
 						obs.QuoteJobsTotal.WithLabelValues("done").Inc()
 						obs.QuoteJobsAttempts.Observe(float64(attempts))
 					}

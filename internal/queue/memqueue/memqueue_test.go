@@ -20,10 +20,11 @@ import (
 var _ queue.JobQueue = (*memqueue.Queue)(nil)
 
 // makeJob constructs a queue.Job using the provided sequential ID generator.
-func makeJob(ids *idgen.SeqIDGenerator, currency, dedupKey string, runAt time.Time) queue.Job {
+func makeJob(ids *idgen.SeqIDGenerator, base, quote, dedupKey string, runAt time.Time) queue.Job {
 	return queue.Job{
 		ID:        queue.JobID(ids.NewID()),
-		Currency:  currency,
+		Base:      base,
+		Quote:     quote,
 		DedupKey:  dedupKey,
 		NextRunAt: runAt,
 	}
@@ -43,7 +44,7 @@ func TestReserve_DoesNotAutoRecoverExpiredLease(t *testing.T) {
 	q := memqueue.New(clk)
 	ctx := context.Background()
 
-	job := makeJob(ids, "EUR", "k1", fixedTime)
+	job := makeJob(ids, "EUR", "USD", "k1", fixedTime)
 	_, _, err := q.Enqueue(ctx, job)
 	require.NoError(t, err)
 
@@ -83,8 +84,8 @@ func TestEnqueue_CoalescingCounterIncrements(t *testing.T) {
 	q := memqueue.New(clk)
 	ctx := context.Background()
 
-	j1 := makeJob(ids, "EUR", "k-coalesce", clk.Now())
-	j2 := makeJob(ids, "EUR", "k-coalesce", clk.Now())
+	j1 := makeJob(ids, "EUR", "USD", "k-coalesce", clk.Now())
+	j2 := makeJob(ids, "EUR", "USD", "k-coalesce", clk.Now())
 
 	_, _, err := q.Enqueue(ctx, j1)
 	require.NoError(t, err)

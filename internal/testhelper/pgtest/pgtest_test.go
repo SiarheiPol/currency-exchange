@@ -57,9 +57,9 @@ func TestNewDB_AppliesMigrations(t *testing.T) {
 	longError := strings.Repeat("x", 4097)
 	_, insertErr := pool.Exec(ctx,
 		`INSERT INTO quote_jobs
-			(id, currency, status, last_error, next_run_at, created_at, updated_at)
+			(id, base, quote, status, last_error, next_run_at, created_at, updated_at)
 		VALUES
-			('00000000-0000-0000-0000-000000000099', 'USD', 'pending', $1, NOW(), NOW(), NOW())`,
+			('00000000-0000-0000-0000-000000000099', 'USD', 'EUR', 'pending', $1, NOW(), NOW(), NOW())`,
 		longError,
 	)
 	assert.Error(t, insertErr,
@@ -86,9 +86,9 @@ func TestNewDB_IsolatesSchemas(t *testing.T) {
 	// A row inserted via db1 must not appear in db2.
 	_, err := db1.Exec(ctx,
 		`INSERT INTO quote_jobs
-			(id, currency, status, next_run_at, created_at, updated_at)
+			(id, base, quote, status, next_run_at, created_at, updated_at)
 		VALUES
-			('00000000-0000-0000-0000-000000000001', 'USD', 'pending', NOW(), NOW(), NOW())`,
+			('00000000-0000-0000-0000-000000000001', 'EUR', 'USD', 'pending', NOW(), NOW(), NOW())`,
 	)
 	require.NoError(t, err)
 

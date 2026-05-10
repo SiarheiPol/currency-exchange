@@ -5,3 +5,4 @@ bin/
 *.exe
 coverage.out
 .env
+.vscode/

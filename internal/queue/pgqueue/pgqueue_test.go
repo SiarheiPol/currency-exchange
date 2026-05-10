@@ -4,9 +4,12 @@ package pgqueue_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,6 +22,9 @@ import (
 	"currency-exchange/internal/testhelper/pgtest"
 )
 
+// TestEnqueue_WritesAllColumns queries base and quote from quote_jobs and
+// asserts both match the enqueued values. Replaces the old single-currency
+// column assertion.
 func TestEnqueue_WritesAllColumns(t *testing.T) {
 	t.Parallel()
 
@@ -30,7 +36,8 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 	idg := idgen.NewSeq()
 	j := queue.Job{
 		ID:        queue.JobID(idg.NewID()),
-		Currency:  "USD",
+		Base:      "USD",
+		Quote:     "MXN",
 		DedupKey:  "test-dedup-key",
 		NextRunAt: knownTime.Add(5 * time.Minute),
 		Attempts:  0,
@@ -42,13 +49,14 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 	assert.True(t, inserted)
 
 	row := pool.QueryRow(context.Background(),
-		`SELECT id, currency, status, attempts, next_run_at, created_at, updated_at,
+		`SELECT id, base, quote, status, attempts, next_run_at, created_at, updated_at,
 		        dedup_key, locked_by, lease_until, completed_at, last_error
 		 FROM quote_jobs WHERE id = $1`, string(j.ID))
 
 	var (
 		dbID          string
-		dbCurrency    string
+		dbBase        string
+		dbQuote       string
 		dbStatus      string
 		dbAttempts    int
 		dbNextRunAt   time.Time
@@ -63,7 +71,8 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 
 	err = row.Scan(
 		&dbID,
-		&dbCurrency,
+		&dbBase,
+		&dbQuote,
 		&dbStatus,
 		&dbAttempts,
 		&dbNextRunAt,
@@ -78,7 +87,8 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, string(j.ID), dbID)
-	assert.Equal(t, "USD", dbCurrency)
+	assert.Equal(t, "USD", dbBase)
+	assert.Equal(t, "MXN", dbQuote)
 	assert.Equal(t, "pending", dbStatus)
 	assert.Equal(t, 0, dbAttempts)
 	assert.Equal(t, j.NextRunAt.Truncate(time.Microsecond), dbNextRunAt.Truncate(time.Microsecond))
@@ -90,6 +100,69 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 	assert.Nil(t, dbLeaseUntil)
 	assert.Nil(t, dbCompletedAt)
 	assert.Nil(t, dbLastError)
+}
+
+// TestEnqueue_SelfPair_Rejected asserts that enqueueing a job where Base ==
+// Quote is rejected by the database CHECK constraint (no_self_pair), and that
+// the error is not ErrNotFound or ErrNotReserved.
+func TestEnqueue_SelfPair_Rejected(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Now())
+	pool := pgtest.NewDB(t)
+	q := pgqueue.New(pool, clk)
+
+	idg := idgen.NewSeq()
+	j := queue.Job{
+		ID:        queue.JobID(idg.NewID()),
+		Base:      "EUR",
+		Quote:     "EUR",
+		DedupKey:  "",
+		NextRunAt: clk.Now(),
+	}
+
+	_, _, err := q.Enqueue(context.Background(), j)
+	require.Error(t, err, "expected error from CHECK constraint on self-pair, got nil")
+	assert.NotErrorIs(t, err, queue.ErrNotFound, "self-pair error must not be ErrNotFound")
+	assert.NotErrorIs(t, err, queue.ErrNotReserved, "self-pair error must not be ErrNotReserved")
+
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr),
+		"expected error to wrap *pgconn.PgError, got %T: %v", err, err)
+	assert.Equal(t, pgerrcode.CheckViolation, pgErr.Code,
+		"expected CHECK violation (code 23514), got %s", pgErr.Code)
+	assert.Equal(t, "no_self_pair", pgErr.ConstraintName,
+		"expected violation of constraint no_self_pair, got %q", pgErr.ConstraintName)
+}
+
+// TestReserve_PopulatesBasePair asserts that Reserve returns a job with both
+// Base and Quote populated correctly from the database.
+func TestReserve_PopulatesBasePair(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Now())
+	pool := pgtest.NewDB(t)
+	q := pgqueue.New(pool, clk)
+
+	idg := idgen.NewSeq()
+	j := queue.Job{
+		ID:        queue.JobID(idg.NewID()),
+		Base:      "GBP",
+		Quote:     "JPY",
+		DedupKey:  "",
+		NextRunAt: clk.Now(),
+	}
+
+	_, inserted, err := q.Enqueue(context.Background(), j)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	reserved, err := q.Reserve(context.Background(), 1, 30*time.Second)
+	require.NoError(t, err)
+	require.Len(t, reserved, 1)
+
+	assert.Equal(t, "GBP", reserved[0].Base)
+	assert.Equal(t, "JPY", reserved[0].Quote)
 }
 
 // TestEnqueue_CoalescingCounterIncrements asserts that the second Enqueue of
@@ -108,13 +181,15 @@ func TestEnqueue_CoalescingCounterIncrements(t *testing.T) {
 
 	j1 := queue.Job{
 		ID:        queue.JobID(idg.NewID()),
-		Currency:  "EUR",
+		Base:      "EUR",
+		Quote:     "USD",
 		DedupKey:  "k-coalesce",
 		NextRunAt: knownTime,
 	}
 	j2 := queue.Job{
 		ID:        queue.JobID(idg.NewID()),
-		Currency:  "EUR",
+		Base:      "EUR",
+		Quote:     "USD",
 		DedupKey:  "k-coalesce",
 		NextRunAt: knownTime,
 	}

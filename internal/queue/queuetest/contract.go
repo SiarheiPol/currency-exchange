@@ -23,12 +23,13 @@ import (
 // subtests.
 type QueueFactory func(t *testing.T, clk clock.Clock) queue.JobQueue
 
-// newJob builds a queue.Job whose ID is drawn from idg and whose Currency and
-// DedupKey are set to the supplied values. NextRunAt is set to clk.Now().
-func newJob(clk clock.Clock, idg idgen.IDGenerator, currency, dedupKey string) queue.Job {
+// newJob builds a queue.Job whose ID is drawn from idg and whose Base, Quote
+// and DedupKey are set to the supplied values. NextRunAt is set to clk.Now().
+func newJob(clk clock.Clock, idg idgen.IDGenerator, base, quote, dedupKey string) queue.Job {
 	return queue.Job{
 		ID:        queue.JobID(idg.NewID()),
-		Currency:  currency,
+		Base:      base,
+		Quote:     quote,
 		DedupKey:  dedupKey,
 		NextRunAt: clk.Now(),
 	}
@@ -54,7 +55,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		id, inserted, err := q.Enqueue(ctx, job)
 
 		require.NoError(t, err)
@@ -69,8 +70,8 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job1 := newJob(clk, idg, "EUR", "k1")
-		job2 := newJob(clk, idg, "USD", "k1")
+		job1 := newJob(clk, idg, "EUR", "USD", "k1")
+		job2 := newJob(clk, idg, "USD", "MXN", "k1")
 
 		id1, inserted1, err := q.Enqueue(ctx, job1)
 		require.NoError(t, err)
@@ -90,7 +91,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job1 := newJob(clk, idg, "EUR", "k1")
+		job1 := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job1)
 		require.NoError(t, err)
 
@@ -101,7 +102,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		err = q.Complete(ctx, job1.ID)
 		require.NoError(t, err)
 
-		job2 := newJob(clk, idg, "GBP", "k1")
+		job2 := newJob(clk, idg, "GBP", "CHF", "k1")
 		id2, inserted2, err := q.Enqueue(ctx, job2)
 		require.NoError(t, err)
 		assert.False(t, inserted2)
@@ -115,9 +116,9 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job1 := newJob(clk, idg, "EUR", "")
-		job2 := newJob(clk, idg, "USD", "")
-		job3 := newJob(clk, idg, "GBP", "")
+		job1 := newJob(clk, idg, "EUR", "USD", "")
+		job2 := newJob(clk, idg, "USD", "MXN", "")
+		job3 := newJob(clk, idg, "GBP", "EUR", "")
 
 		_, ins1, err := q.Enqueue(ctx, job1)
 		require.NoError(t, err)
@@ -143,19 +144,22 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 
 		jobA := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "EUR",
+			Base:      "EUR",
+			Quote:     "USD",
 			DedupKey:  "a",
 			NextRunAt: base.Add(10 * time.Second),
 		}
 		jobB := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "USD",
+			Base:      "USD",
+			Quote:     "MXN",
 			DedupKey:  "b",
 			NextRunAt: base.Add(5 * time.Second),
 		}
 		jobC := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "GBP",
+			Base:      "GBP",
+			Quote:     "EUR",
 			DedupKey:  "c",
 			NextRunAt: base.Add(20 * time.Second),
 		}
@@ -173,9 +177,31 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		require.NoError(t, err)
 		require.Len(t, jobs, 3)
 
-		assert.Equal(t, "USD", jobs[0].Currency) // T+5s
-		assert.Equal(t, "EUR", jobs[1].Currency) // T+10s
-		assert.Equal(t, "GBP", jobs[2].Currency) // T+20s
+		assert.Equal(t, "USD", jobs[0].Base) // T+5s
+		assert.Equal(t, "EUR", jobs[1].Base) // T+10s
+		assert.Equal(t, "GBP", jobs[2].Base) // T+20s
+	})
+
+	// Reserve/PreservesPair: enqueue a job with a specific Base/Quote pair, reserve
+	// it, and assert both fields survive the round-trip in the correct order.
+	// This catches a Scan-order swap that the type system (two strings) cannot detect.
+	t.Run("Reserve/PreservesPair", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := newJob(clk, idg, "EUR", "MXN", "pair-trip")
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		reserved, err := q.Reserve(ctx, 1, 30*time.Second)
+		require.NoError(t, err)
+		require.Len(t, reserved, 1)
+
+		assert.Equal(t, "EUR", reserved[0].Base)
+		assert.Equal(t, "MXN", reserved[0].Quote)
 	})
 
 	t.Run("Reserve/RespectsNLimit", func(t *testing.T) {
@@ -186,7 +212,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		ctx := context.Background()
 
 		for i := 0; i < 5; i++ {
-			job := newJob(clk, idg, "EUR", "")
+			job := newJob(clk, idg, "EUR", "USD", "")
 			_, _, err := q.Enqueue(ctx, job)
 			require.NoError(t, err)
 		}
@@ -206,13 +232,15 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 
 		future := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "EUR",
+			Base:      "EUR",
+			Quote:     "USD",
 			DedupKey:  "future",
 			NextRunAt: base.Add(1 * time.Second),
 		}
 		past := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "USD",
+			Base:      "USD",
+			Quote:     "MXN",
 			DedupKey:  "past",
 			NextRunAt: base.Add(-1 * time.Second),
 		}
@@ -226,7 +254,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		jobs, err := q.Reserve(ctx, 10, 30*time.Second)
 		require.NoError(t, err)
 		require.Len(t, jobs, 1)
-		assert.Equal(t, "USD", jobs[0].Currency)
+		assert.Equal(t, "USD", jobs[0].Base)
 	})
 
 	t.Run("Reserve/MarksRunning_SubsequentSkips", func(t *testing.T) {
@@ -236,7 +264,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -256,7 +284,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -265,7 +293,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		require.Len(t, reserved, 1)
 
 		// Mutate the returned copy.
-		reserved[0].Currency = "MUTATED"
+		reserved[0].Base = "MUTATED"
 
 		// Complete still works, proving the queue holds an independent copy.
 		err = q.Complete(ctx, job.ID)
@@ -281,7 +309,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -299,7 +327,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -330,7 +358,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -347,7 +375,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -373,7 +401,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -406,7 +434,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -423,7 +451,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -455,7 +483,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
-		job := newJob(clk, idg, "EUR", "k1")
+		job := newJob(clk, idg, "EUR", "USD", "k1")
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
@@ -491,7 +519,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		// Three separate queues / jobs, one per operation, to avoid order
 		// dependence between the three assertions.
 		enqueueAndGet := func() queue.JobID {
-			job := newJob(clk, idg, "EUR", "")
+			job := newJob(clk, idg, "EUR", "USD", "")
 			_, _, err := q.Enqueue(ctx, job)
 			require.NoError(t, err)
 			return job.ID
@@ -539,7 +567,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		idg := idgen.NewSeq()
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
-			job := newJob(clk, idg, "EUR", "race-key")
+			job := newJob(clk, idg, "EUR", "USD", "race-key")
 			go func(j queue.Job) {
 				defer wg.Done()
 				id, inserted, err := q.Enqueue(ctx, j)

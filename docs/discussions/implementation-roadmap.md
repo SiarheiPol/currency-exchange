@@ -36,10 +36,10 @@ Queue, schemas, worker mechanics. No HTTP yet, no observability yet.
 ### Stage 1 amendments (pair-based pivot — C0/C1)
 
 - [x] Plan change: pair-based currency model + apilayer-family provider (docs rewrite — C0)
-- [ ] Schema rework: `quote_jobs` and `quotes` tables to pair-based columns (C1)
-- [ ] `Job` struct rework: `Base, Quote string` fields replacing the old single-currency field (C1)
-- [ ] `pgQueue`, `memQueue`, contract tests updated to pair-based `Job` (C1)
-- [ ] `obs/helpers.go` log helpers: `currency string` → `base, quote string` (C1)
+- [x] Schema rework: `quote_jobs` and `quotes` tables to pair-based columns (C1)
+- [x] `Job` struct rework: `Base, Quote string` fields replacing the old single-currency field (C1)
+- [x] `pgQueue`, `memQueue`, contract tests updated to pair-based `Job` (C1)
+- [x] `obs/helpers.go` log helpers: `currency string` → `base, quote string` (C1)
 
 - [x] Migration: `quote_jobs` table — see `background-mechanism.md`
 - [x] Migration: `quotes` table — see `background-mechanism.md`

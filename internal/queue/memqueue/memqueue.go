@@ -57,7 +57,7 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 	if j.DedupKey != "" {
 		if existingID, ok := q.dedup[j.DedupKey]; ok {
 			obs.CoalescingCollapsedTotal.Inc()
-			obs.LogCoalescingCollapsed(ctx, j.Currency, j.DedupKey)
+			obs.LogCoalescingCollapsed(ctx, string(existingID), j.Base, j.Quote)
 			return existingID, false, nil
 		}
 	}

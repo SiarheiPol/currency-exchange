@@ -21,8 +21,10 @@ type JobID string
 type Job struct {
 	// ID is the job's identifier.
 	ID JobID
-	// Currency is the ISO 4217 code the job will fetch (e.g., "EUR").
-	Currency string
+	// Base is the ISO 4217 base currency of the pair (e.g., "EUR" in EUR/MXN).
+	Base string
+	// Quote is the ISO 4217 quote currency of the pair (e.g., "MXN" in EUR/MXN).
+	Quote string
 	// DedupKey collapses concurrent enqueues for the same logical work into
 	// a single job. Empty disables coalescing for the job.
 	DedupKey string

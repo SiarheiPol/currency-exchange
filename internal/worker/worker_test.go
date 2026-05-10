@@ -55,7 +55,8 @@ func TestWorker_ReservesAndCompletesJob(t *testing.T) {
 	gen := idgen.NewSeq()
 	_, _, err := q.Enqueue(context.Background(), queue.Job{
 		ID:        queue.JobID(gen.NewID()),
-		Currency:  "EUR",
+		Base:      "EUR",
+		Quote:     "MXN",
 		NextRunAt: clk.Now(), // already eligible
 	})
 	require.NoError(t, err)
@@ -131,7 +132,8 @@ func TestWorker_InstrumentsLifecycle(t *testing.T) {
 	gen := idgen.NewSeq()
 	_, _, err := q.Enqueue(context.Background(), queue.Job{
 		ID:        queue.JobID(gen.NewID()),
-		Currency:  "EUR",
+		Base:      "EUR",
+		Quote:     "MXN",
 		NextRunAt: clk.Now(),
 	})
 	require.NoError(t, err)

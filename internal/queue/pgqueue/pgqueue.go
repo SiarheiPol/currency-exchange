@@ -42,18 +42,18 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 	var returnedID string
 	err := q.pool.QueryRow(ctx, `
 		INSERT INTO quote_jobs (
-			id, currency, status, attempts,
+			id, base, quote, status, attempts,
 			next_run_at, created_at, updated_at,
 			dedup_key, locked_by, lease_until, completed_at, last_error
 		) VALUES (
-			$1, $2, 'pending', 0,
-			$3, $4, $4,
-			$5, NULL, NULL, NULL, NULL
+			$1, $2, $3, 'pending', 0,
+			$4, $5, $5,
+			$6, NULL, NULL, NULL, NULL
 		)
 		ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL
 		DO NOTHING
 		RETURNING id`,
-		string(j.ID), j.Currency, j.NextRunAt, now, dedupKey,
+		string(j.ID), j.Base, j.Quote, j.NextRunAt, now, dedupKey,
 	).Scan(&returnedID)
 
 	if err == nil {
@@ -72,7 +72,7 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 			return "", false, fmt.Errorf("pgqueue enqueue: lookup existing: %w", err2)
 		}
 		obs.CoalescingCollapsedTotal.Inc()
-		obs.LogCoalescingCollapsed(ctx, j.Currency, j.DedupKey)
+		obs.LogCoalescingCollapsed(ctx, existingID, j.Base, j.Quote)
 		return queue.JobID(existingID), false, nil
 	}
 
@@ -98,7 +98,7 @@ func (q *Queue) Reserve(ctx context.Context, n int, lease time.Duration) ([]queu
 		       updated_at  = $1
 		FROM selected
 		WHERE quote_jobs.id = selected.id
-		RETURNING quote_jobs.id, quote_jobs.currency, quote_jobs.attempts, quote_jobs.next_run_at`,
+		RETURNING quote_jobs.id, quote_jobs.base, quote_jobs.quote, quote_jobs.attempts, quote_jobs.next_run_at`,
 		now, n, now.Add(lease),
 	)
 	if err != nil {
@@ -110,7 +110,7 @@ func (q *Queue) Reserve(ctx context.Context, n int, lease time.Duration) ([]queu
 	for rows.Next() {
 		var j queue.Job
 		var id string
-		if err := rows.Scan(&id, &j.Currency, &j.Attempts, &j.NextRunAt); err != nil {
+		if err := rows.Scan(&id, &j.Base, &j.Quote, &j.Attempts, &j.NextRunAt); err != nil {
 			return nil, fmt.Errorf("pgqueue reserve: scan: %w", err)
 		}
 		j.ID = queue.JobID(id)

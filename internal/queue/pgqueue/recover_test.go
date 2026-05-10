@@ -39,11 +39,11 @@ func TestRecoverExpired_IgnoresNonRunningStatuses(t *testing.T) {
 		ids[i] = id
 		_, err := pool.Exec(ctx, `
 			INSERT INTO quote_jobs (
-				id, currency, status, attempts,
+				id, base, quote, status, attempts,
 				next_run_at, created_at, updated_at,
 				lease_until
-			) VALUES ($1, $2, $3, 0, $4, $4, $4, $5)`,
-			id, "GBP", status, knownTime, pastLease,
+			) VALUES ($1, $2, $3, $4, 0, $5, $5, $5, $6)`,
+			id, "GBP", "USD", status, knownTime, pastLease,
 		)
 		require.NoError(t, err)
 	}

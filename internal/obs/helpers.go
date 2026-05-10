@@ -7,37 +7,45 @@ import (
 )
 
 // LogJobReserved logs that a job was reserved from the queue.
-func LogJobReserved(ctx context.Context, jobID, currency string) {
+// base and quote identify the currency pair (e.g. "USD", "EUR").
+func LogJobReserved(ctx context.Context, jobID, base, quote string) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvJobReserved,
 		slog.String("job_id", jobID),
-		slog.String("currency", currency),
+		slog.String("base", base),
+		slog.String("quote", quote),
 	)
 }
 
 // LogJobCompleted logs that a job finished successfully.
-func LogJobCompleted(ctx context.Context, jobID, currency string, duration time.Duration) {
+// base and quote identify the currency pair (e.g. "USD", "EUR").
+func LogJobCompleted(ctx context.Context, jobID, base, quote string, duration time.Duration) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvJobCompleted,
 		slog.String("job_id", jobID),
-		slog.String("currency", currency),
+		slog.String("base", base),
+		slog.String("quote", quote),
 		slog.Int64("duration_ms", duration.Milliseconds()),
 	)
 }
 
 // LogJobRescheduled logs that a job was rescheduled for a future retry.
-func LogJobRescheduled(ctx context.Context, jobID, currency string, attempts int, nextDelay time.Duration) {
+// base and quote identify the currency pair (e.g. "USD", "EUR").
+func LogJobRescheduled(ctx context.Context, jobID, base, quote string, attempts int, nextDelay time.Duration) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelWarn, EvJobRescheduled,
 		slog.String("job_id", jobID),
-		slog.String("currency", currency),
+		slog.String("base", base),
+		slog.String("quote", quote),
 		slog.Int("attempts", attempts),
 		slog.Int64("next_delay_ms", nextDelay.Milliseconds()),
 	)
 }
 
 // LogJobFailed logs that a job has exhausted all retries and is permanently failed.
-func LogJobFailed(ctx context.Context, jobID, currency string, attempts int, err error) {
+// base and quote identify the currency pair (e.g. "USD", "EUR").
+func LogJobFailed(ctx context.Context, jobID, base, quote string, attempts int, err error) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelError, EvJobFailed,
 		slog.String("job_id", jobID),
-		slog.String("currency", currency),
+		slog.String("base", base),
+		slog.String("quote", quote),
 		slog.Int("attempts", attempts),
 		slog.String("error", err.Error()),
 	)
@@ -92,11 +100,14 @@ func LogHTTPRequestCompleted(ctx context.Context, method, path string, statusCod
 	)
 }
 
-// LogCoalescingCollapsed logs that a duplicate request was collapsed into an in-flight request.
-func LogCoalescingCollapsed(ctx context.Context, currency, dedupKey string) {
+// LogCoalescingCollapsed logs that a duplicate enqueue was collapsed into an
+// already-queued job. jobID is the existing job that absorbed the duplicate;
+// base and quote identify the currency pair.
+func LogCoalescingCollapsed(ctx context.Context, jobID, base, quote string) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelDebug, EvCoalescingCollapsed,
-		slog.String("currency", currency),
-		slog.String("dedup_key", dedupKey),
+		slog.String("job_id", jobID),
+		slog.String("base", base),
+		slog.String("quote", quote),
 	)
 }
 

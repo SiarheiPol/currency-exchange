@@ -36,7 +36,8 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 
 		job := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "EUR",
+			Base:      "EUR",
+			Quote:     "USD",
 			NextRunAt: base,
 		}
 		_, _, err := q.Enqueue(ctx, job)
@@ -71,7 +72,8 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 
 		job := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "USD",
+			Base:      "USD",
+			Quote:     "MXN",
 			NextRunAt: base,
 		}
 		_, _, err := q.Enqueue(ctx, job)
@@ -103,7 +105,8 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 		for i := 0; i < 3; i++ {
 			job := queue.Job{
 				ID:        queue.JobID(idg.NewID()),
-				Currency:  "GBP",
+				Base:      "GBP",
+				Quote:     "EUR",
 				NextRunAt: base,
 			}
 			_, _, err := q.Enqueue(ctx, job)
@@ -133,7 +136,8 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 
 		job := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "CAD",
+			Base:      "CAD",
+			Quote:     "USD",
 			NextRunAt: base,
 		}
 		_, _, err := q.Enqueue(ctx, job)
@@ -150,12 +154,12 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, n)
 
-		// Reserve again — must return the same job with the same ID and Currency.
+		// Reserve again — must return the same job with the same ID and Base.
 		reReserved, err := q.Reserve(ctx, 1, 60*time.Second)
 		require.NoError(t, err)
 		require.Len(t, reReserved, 1)
 		assert.Equal(t, job.ID, reReserved[0].ID)
-		assert.Equal(t, job.Currency, reReserved[0].Currency)
+		assert.Equal(t, job.Base, reReserved[0].Base)
 	})
 
 	t.Run("RecoverExpired/ExactBoundary_LeaseEqualNowIsNotExpired", func(t *testing.T) {
@@ -168,7 +172,8 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 
 		job := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
-			Currency:  "CHF",
+			Base:      "CHF",
+			Quote:     "EUR",
 			NextRunAt: base,
 		}
 		_, _, err := q.Enqueue(ctx, job)
