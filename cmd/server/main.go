@@ -32,6 +32,8 @@ import (
 	"currency-exchange/internal/httpmw"
 	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue/pgqueue"
+	"currency-exchange/internal/quoterepo/pgquoterepo"
+	"currency-exchange/internal/ratesprovider/apilayer"
 	"currency-exchange/internal/worker"
 )
 
@@ -73,7 +75,10 @@ func run() error {
 
 	clk := clock.New()
 	q := pgqueue.New(pool, clk)
-	w := worker.New(q, q, clk)
+	// Provider config (APIKey, BaseURL) is wired in a dedicated Stage 5 iteration.
+	provider := &apilayer.Provider{Clock: clk}
+	repo := pgquoterepo.New(pool)
+	w := worker.New(q, q, provider, repo, clk)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})

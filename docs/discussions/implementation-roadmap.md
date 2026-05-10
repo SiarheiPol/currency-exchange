@@ -87,12 +87,12 @@ Refresh-path code, scheduler, real upstream client.
 - [x] `FetchResult.Missing` refactor: replace `Errors map[Pair]*ProviderError` with `Missing []Pair` in `provider.go`; update interface godoc — see `fetchresult-missing-pairs.md`
 - [x] `fakeRatesProvider` for tests (three test patterns: success / batch-failure / partial-success with missing-pair detection)
 - [x] `apilayerProvider` (real implementation; per-base HTTP grouping; `httptest`-based unit tests) — see `apilayer-spec.md` for endpoint, response shapes, and error-code mapping
-- [ ] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
+- [x] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
 - [ ] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
 - [ ] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
-- [ ] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
+- [x] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
 - [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
-- [ ] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
+- [x] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
 - [ ] All upstream call paths emit metrics + logs through `internal/obs`
 - [ ] Coalescing-collapse counter incremented on `Enqueue` conflicts
 

@@ -5,6 +5,8 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
+	"currency-exchange/internal/quoterepo"
+	"currency-exchange/internal/ratesprovider"
 )
 
 // Option is a functional option for configuring a Worker.
@@ -21,6 +25,8 @@ type Option func(*Worker)
 type Worker struct {
 	q             queue.JobQueue
 	cleaner       queue.Cleaner
+	provider      ratesprovider.RatesProvider
+	repo          quoterepo.QuoteRepo
 	clk           clock.Clock
 	pollInterval  time.Duration
 	leaseTime     time.Duration
@@ -60,13 +66,22 @@ func WithCleanInterval(d time.Duration) Option {
 	return func(w *Worker) { w.cleanInterval = d }
 }
 
-// New constructs a Worker with the given queue, cleaner, clock, and options.
-// Default values: pollInterval=5s, leaseTime=60s, maxAttempts=5, batchSize=1,
-// cleanInterval=60s.
-func New(q queue.JobQueue, cleaner queue.Cleaner, clk clock.Clock, opts ...Option) *Worker {
+// New constructs a Worker with the given queue, cleaner, rates provider, quote
+// repo, clock, and options. Default values: pollInterval=5s, leaseTime=60s,
+// maxAttempts=5, batchSize=1, cleanInterval=60s.
+func New(
+	q queue.JobQueue,
+	cleaner queue.Cleaner,
+	provider ratesprovider.RatesProvider,
+	repo quoterepo.QuoteRepo,
+	clk clock.Clock,
+	opts ...Option,
+) *Worker {
 	w := &Worker{
 		q:             q,
 		cleaner:       cleaner,
+		provider:      provider,
+		repo:          repo,
 		clk:           clk,
 		pollInterval:  5 * time.Second,
 		leaseTime:     60 * time.Second,
@@ -102,34 +117,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			for _, job := range jobs {
 				obs.LogJobReserved(ctx, string(job.ID), job.Base, job.Quote)
 				startedAt := time.Now()
-				if perr := w.processJob(ctx, job); perr != nil {
-					attempts := job.Attempts + 1
-					if job.Attempts < w.maxAttempts {
-						delay := backoff.Compute(job.Attempts)
-						if rErr := w.q.Reschedule(ctx, job.ID, perr.Error(), delay); rErr != nil {
-							obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
-						} else {
-							obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, delay)
-						}
-					} else {
-						if fErr := w.q.Fail(ctx, job.ID, perr.Error()); fErr != nil {
-							obs.LogWorkerOpFailed(ctx, "fail", fErr)
-						} else {
-							obs.LogJobFailed(ctx, string(job.ID), job.Base, job.Quote, attempts, perr)
-							obs.QuoteJobsTotal.WithLabelValues("failed").Inc()
-							obs.QuoteJobsAttempts.Observe(float64(attempts))
-						}
-					}
-				} else {
-					if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
-						obs.LogWorkerOpFailed(ctx, "complete", cErr)
-					} else {
-						attempts := job.Attempts + 1
-						obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
-						obs.QuoteJobsTotal.WithLabelValues("done").Inc()
-						obs.QuoteJobsAttempts.Observe(float64(attempts))
-					}
-				}
+				w.dispatch(ctx, job, startedAt)
 			}
 		case <-cleanTicker.C:
 			w.lastIterationUnixNano.Store(time.Now().UnixNano())
@@ -145,10 +133,93 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// processJob executes the work for a single job. This is a stub that always
-// returns nil; it will be wired to a RatesProvider in Stage 3.
-func (w *Worker) processJob(_ context.Context, _ queue.Job) error {
-	return nil
+// dispatch runs a single job to completion, handling all queue state
+// transitions (Complete, Reschedule, Fail) internally.
+func (w *Worker) dispatch(ctx context.Context, job queue.Job, startedAt time.Time) {
+	pair := ratesprovider.Pair{Base: job.Base, Quote: job.Quote}
+	res, err := w.provider.FetchPairs(ctx, []ratesprovider.Pair{pair})
+	if err != nil {
+		w.handleBatchError(ctx, job, err)
+		return
+	}
+
+	if q, ok := res.Quotes[pair]; ok {
+		// Happy path: upsert then complete.
+		if uErr := w.repo.UpsertBatch(ctx, []ratesprovider.Quote{q}); uErr != nil {
+			// Upsert failed — reschedule or fail via attempt budget.
+			wrapped := fmt.Errorf("upsert quote: %w", uErr)
+			w.rescheduleOrFail(ctx, job, wrapped)
+			return
+		}
+		if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
+			obs.LogWorkerOpFailed(ctx, "complete", cErr)
+		} else {
+			attempts := job.Attempts + 1
+			obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
+			obs.QuoteJobsTotal.WithLabelValues("done").Inc()
+			obs.QuoteJobsAttempts.Observe(float64(attempts))
+		}
+		return
+	}
+
+	// pair is in res.Missing (or absent from both — defensive): permanent fail.
+	w.failJob(ctx, job, errors.New("missing in upstream response"))
+}
+
+// handleBatchError classifies the provider error and either reschedules or
+// fails the job according to its Code and the attempt budget.
+func (w *Worker) handleBatchError(ctx context.Context, job queue.Job, err error) {
+	var pe *ratesprovider.ProviderError
+	if !errors.As(err, &pe) {
+		// Unknown error type — treat as transient.
+		pe = &ratesprovider.ProviderError{Code: "transient", Message: err.Error()}
+	}
+
+	switch pe.Code {
+	case "quota_exceeded":
+		delay := time.Hour
+		if rErr := w.q.Reschedule(ctx, job.ID, pe.Error(), delay); rErr != nil {
+			obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
+		} else {
+			attempts := job.Attempts + 1
+			obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, delay)
+		}
+
+	case "transient":
+		w.rescheduleOrFail(ctx, job, pe)
+
+	default:
+		// "permanent" or any unrecognised code — fail immediately.
+		w.failJob(ctx, job, pe)
+	}
+}
+
+// rescheduleOrFail reschedules the job with backoff if the attempt budget
+// permits, otherwise fails it permanently.
+func (w *Worker) rescheduleOrFail(ctx context.Context, job queue.Job, err error) {
+	if job.Attempts < w.maxAttempts {
+		delay := backoff.Compute(job.Attempts)
+		if rErr := w.q.Reschedule(ctx, job.ID, err.Error(), delay); rErr != nil {
+			obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
+		} else {
+			attempts := job.Attempts + 1
+			obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, delay)
+		}
+	} else {
+		w.failJob(ctx, job, err)
+	}
+}
+
+// failJob calls queue.Fail and emits the appropriate obs calls.
+func (w *Worker) failJob(ctx context.Context, job queue.Job, err error) {
+	if fErr := w.q.Fail(ctx, job.ID, err.Error()); fErr != nil {
+		obs.LogWorkerOpFailed(ctx, "fail", fErr)
+	} else {
+		attempts := job.Attempts + 1
+		obs.LogJobFailed(ctx, string(job.ID), job.Base, job.Quote, attempts, err)
+		obs.QuoteJobsTotal.WithLabelValues("failed").Inc()
+		obs.QuoteJobsAttempts.Observe(float64(attempts))
+	}
 }
 
 // LastIteration returns the wall-clock time of the most recent loop iteration,
