@@ -91,7 +91,7 @@ Refresh-path code, scheduler, real upstream client.
 - [x] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
 - [x] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
 - [x] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
-- [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
+- [x] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
 - [x] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
 - [x] All upstream call paths emit metrics + logs through `internal/obs`
 - [x] Coalescing-collapse counter incremented on `Enqueue` conflicts

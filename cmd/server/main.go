@@ -34,6 +34,7 @@ import (
 	"currency-exchange/internal/queue/pgqueue"
 	"currency-exchange/internal/quoterepo/pgquoterepo"
 	"currency-exchange/internal/ratesprovider/apilayer"
+	"currency-exchange/internal/startup"
 	"currency-exchange/internal/worker"
 )
 
@@ -53,16 +54,15 @@ func main() {
 func run() error {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	addr := envOr("HTTP_ADDR", ":8080")
-	dsn, ok := os.LookupEnv("DB_DSN")
-	if !ok || dsn == "" {
-		return errors.New("DB_DSN environment variable is required")
+	cfg, err := Load()
+	if err != nil {
+		return err
 	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(rootCtx, dsn)
+	pool, err := pgxpool.New(rootCtx, cfg.DBDSN)
 	if err != nil {
 		return fmt.Errorf("pgxpool.New: %w", err)
 	}
@@ -75,8 +75,20 @@ func run() error {
 
 	clk := clock.New()
 	q := pgqueue.New(pool, clk)
-	// Provider config (APIKey, BaseURL) is wired in a dedicated Stage 5 iteration.
-	provider := &apilayer.Provider{Clock: clk}
+	provider := &apilayer.Provider{
+		APIKey:  cfg.ProviderAPIKey,
+		BaseURL: cfg.ProviderBaseURL,
+		Clock:   clk,
+	}
+
+	// Probe the upstream provider before accepting traffic. Any failure aborts startup.
+	probeCtx, probeCancel := context.WithTimeout(rootCtx, 5*time.Second)
+	defer probeCancel()
+	if err := startup.Probe(probeCtx, provider); err != nil {
+		return fmt.Errorf("startup probe: %w", err)
+	}
+	obs.Logger(rootCtx).Info(obs.EvStartupProbeOK)
+
 	repo := pgquoterepo.New(pool)
 	w := worker.New(q, q, provider, repo, clk)
 
@@ -100,14 +112,14 @@ func run() error {
 	))
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              cfg.HTTPAddr,
 		Handler:           httpmw.RequestID(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	serverErr := make(chan error, 1)
 	go func() {
-		obs.Logger(rootCtx).Info("http server starting", "addr", addr)
+		obs.Logger(rootCtx).Info("http server starting", "addr", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 			return

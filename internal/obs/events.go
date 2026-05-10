@@ -17,4 +17,5 @@ const (
 	EvWorkerOpFailed          = "worker operation failed"
 	EvProviderResponseAnomaly = "provider response anomaly"
 	EvProviderQuotaExceeded   = "provider quota exceeded"
+	EvStartupProbeOK          = "startup probe ok"
 )

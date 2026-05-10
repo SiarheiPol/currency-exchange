@@ -64,8 +64,8 @@ Key variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `DB_DSN` | `postgres://...` | Postgres connection string |
-| `RATES_PROVIDER_URL` | fake provider | upstream rates URL |
-| `RATES_PROVIDER_KEY` | (empty for fake) | API key for real upstream |
+| `PROVIDER_API_KEY` | (required) | API key for the upstream rates provider |
+| `PROVIDER_BASE_URL` | `https://api.currencylayer.com` | upstream rates base URL |
 | `SCHEDULER_TICK_SECONDS` | 30 | scheduler interval `T` |
 | `COALESCING_WINDOW_SECONDS` | 30 | dedup bucket size `W` (constraint: `W ≤ T`) |
 | `WORKER_COUNT` | 1 | number of worker goroutines `K` |
