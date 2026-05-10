@@ -191,7 +191,7 @@ The worker handles each category:
 
 There is no cross-rate derivation. `EUR/MXN` is fetched directly from upstream (`source=EUR&currencies=MXN`) because reciprocal and cross-rate computation introduces measurable error (empirically: 5×10⁻⁷ to 6×10⁻⁶ divergence).
 
-The `apilayerProvider` implementation groups the `pairs []Pair` slice by `Base`, then issues **one HTTP call per unique base** (`source=<base>&currencies=<comma-joined quotes>`). This is an implementation detail of the provider, not of the worker.
+The `apilayerProvider` implementation groups the `pairs []Pair` slice by `Base`, then issues **one HTTP call per unique base** (`source=<base>&currencies=<comma-joined quotes>`). This is an implementation detail of the provider, not of the worker. The full endpoint spec, response shapes, and error-code mapping live in `apilayer-spec.md`.
 
 **Provider capability check at startup.** The service performs a synthetic pair call (e.g., `FetchPairs([{USD, EUR}])`) at startup. The implementation parses the `success` boolean in the upstream JSON response body — a `success: false` body returned with HTTP 200 is treated as a failure (empirically confirmed: auth failures, quota exhaustion, and other global errors use this shape). If startup fails for a clear reason (e.g., `success:false` with code 101 — invalid key), the service refuses to start with a descriptive error. Misconfiguration is caught before traffic.
 
