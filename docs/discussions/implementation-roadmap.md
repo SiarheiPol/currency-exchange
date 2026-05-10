@@ -102,7 +102,7 @@ Refresh-path code, scheduler, real upstream client.
 
 HTTP handlers, OpenAPI spec, contract enforcement.
 
-- [ ] `api/openapi.yaml` — full spec for 3 endpoints (request/response/errors/headers) — see `api-contract.md`
+- [x] `api/openapi.yaml` — full spec for 3 endpoints (request/response/errors/headers) — see `api-contract.md`
 - [ ] `oapi-codegen` wired in `go generate` — see `openapi.md`
 - [ ] `internal/api/oapi_gen.go` checked in
 - [ ] `make check` includes `git diff --exit-code` after `go generate`

@@ -1,0 +1,455 @@
+openapi: "3.0.3"
+
+info:
+  title: Currency Quote Service
+  version: "0.1.0"
+  description: |
+    Asynchronous currency quote service. Clients trigger a refresh via
+    POST /quotes/refresh, poll for the result via GET /quotes/{id}, and
+    read the latest cached quote via GET /quotes/latest.
+
+paths:
+  /quotes/refresh:
+    post:
+      operationId: refreshQuote
+      summary: Trigger a background currency-rate fetch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Job accepted and durably enqueued.
+          headers:
+            Location:
+              description: URL of the newly created job resource.
+              schema:
+                type: string
+            Cache-Control:
+              description: Cache directive for the response.
+              schema:
+                type: string
+            X-Request-Id:
+              description: Request correlation identifier.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshAccepted"
+        "400":
+          description: Bad request — invalid pair format, unsupported currency, or self-pair.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /quotes/{id}:
+    get:
+      operationId: getQuoteJob
+      summary: Return the state of one refresh job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job found; body reflects current status (pending, done, or failed).
+          headers:
+            Cache-Control:
+              description: Caching directive appropriate for the job status.
+              schema:
+                type: string
+            ETag:
+              description: Entity tag for terminal responses (done or failed).
+              schema:
+                type: string
+            Retry-After:
+              description: Recommended polling interval in seconds (pending only).
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+        "304":
+          description: Not Modified — conditional GET matched; no body returned.
+          headers:
+            ETag:
+              description: Entity tag for the cached resource.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+        "400":
+          description: Bad request — id is not a valid UUID.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Job not found.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /quotes/latest:
+    get:
+      operationId: getLatestQuote
+      summary: Return the last successful quote for a currency pair
+      parameters:
+        - name: base
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+        - name: quote
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Latest successful quote for the requested pair.
+          headers:
+            Cache-Control:
+              description: Public caching directive with max-age equal to coalescing window.
+              schema:
+                type: string
+            ETag:
+              description: Entity tag for conditional GET support.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatestQuote"
+        "304":
+          description: Not Modified — ETag matched; no body returned.
+          headers:
+            ETag:
+              description: Entity tag for the cached resource.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+        "400":
+          description: Bad request — unsupported currency, invalid format, or self-pair.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No successful quote exists yet for this pair.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    RefreshRequest:
+      type: object
+      required:
+        - base
+        - quote
+      properties:
+        base:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: EUR
+        quote:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: MXN
+
+    RefreshAccepted:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "9b6e1f3a-0000-0000-0000-000000000000"
+
+    JobStatus:
+      oneOf:
+        - $ref: "#/components/schemas/JobStatusPending"
+        - $ref: "#/components/schemas/JobStatusDone"
+        - $ref: "#/components/schemas/JobStatusFailed"
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: "#/components/schemas/JobStatusPending"
+          done: "#/components/schemas/JobStatusDone"
+          failed: "#/components/schemas/JobStatusFailed"
+
+    JobStatusPending:
+      type: object
+      required:
+        - id
+        - base
+        - quote
+        - status
+        - created_at
+        - attempts
+      properties:
+        id:
+          type: string
+          format: uuid
+        base:
+          type: string
+        quote:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+        created_at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          minimum: 0
+
+    JobStatusDone:
+      type: object
+      required:
+        - id
+        - base
+        - quote
+        - status
+        - created_at
+        - completed_at
+        - price
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        base:
+          type: string
+        quote:
+          type: string
+        status:
+          type: string
+          enum:
+            - done
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        price:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
+
+    JobStatusFailed:
+      type: object
+      required:
+        - id
+        - base
+        - quote
+        - status
+        - created_at
+        - completed_at
+        - attempts
+        - error
+      properties:
+        id:
+          type: string
+          format: uuid
+        base:
+          type: string
+        quote:
+          type: string
+        status:
+          type: string
+          enum:
+            - failed
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          minimum: 0
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+    LatestQuote:
+      type: object
+      required:
+        - base
+        - quote
+        - price
+        - updated_at
+      properties:
+        base:
+          type: string
+          example: EUR
+        quote:
+          type: string
+          example: MXN
+        price:
+          type: number
+          format: double
+          example: 20.255648
+        updated_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - unsupported_currency
+                - no_data
+                - not_found
+                - upstream_unavailable
+                - internal
+            message:
+              type: string
+              example: "currency 'JPY' is not supported"
