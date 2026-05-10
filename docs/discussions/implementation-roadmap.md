@@ -132,12 +132,12 @@ Run-from-zero story for reviewers and operators.
 
 A standalone binary that imitates the apilayer-family (currencylayer). Lets reviewers run the service end-to-end without a paid API key, and lets us simulate plans we cannot buy (Enterprise). Reused in Stage 6 for load testing.
 
-- [ ] `cmd/fakeprovider/main.go` — separate binary, listens on its own port
-- [ ] HTTP-compatible with apilayer-family (currencylayer): `/live` endpoint, query params (`access_key`, `currencies`, `source`), response shape (`{success, timestamp, source, quotes}` with `success: false` error shape `{success: false, error: {code, info}}`)
+- [x] `cmd/fakeprovider/main.go` — separate binary, listens on its own port
+- [x] HTTP-compatible with apilayer-family (currencylayer): `/live` endpoint, query params (`access_key`, `currencies`, `source`), response shape (`{success, timestamp, source, quotes}` with `success: false` error shape `{success: false, error: {code, info}}`)
 - [ ] Plan simulation via flags / env vars: monthly quota, update cadence, optional latency injection
-- [ ] Random-walk rate generation with deterministic seed (reproducible runs)
-- [ ] **In-memory state only** — restart resets quota counter and current rates
-- [ ] Minimal contract tests (response shape, quota counting, cadence respected)
+- [x] Random-walk rate generation with deterministic seed (reproducible runs)
+- [x] **In-memory state only** — restart resets quota counter and current rates
+- [x] Minimal contract tests (response shape, quota counting, cadence respected)
 
 ### Compose stack
 

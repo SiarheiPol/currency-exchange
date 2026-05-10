@@ -18,4 +18,6 @@ const (
 	EvProviderResponseAnomaly = "provider response anomaly"
 	EvProviderQuotaExceeded   = "provider quota exceeded"
 	EvStartupProbeOK          = "startup probe ok"
+	EvFakeproviderStarted     = "fakeprovider starting"
+	EvFakeproviderShutdown    = "shutdown signal received"
 )

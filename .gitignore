@@ -2,6 +2,7 @@ Requirements.pdf
 .claude/settings.json
 bin/
 /server
+/fakeprovider
 *.exe
 coverage.out
 .env
