@@ -163,6 +163,21 @@ func TestReserve_PopulatesBasePair(t *testing.T) {
 
 	assert.Equal(t, "GBP", reserved[0].Base)
 	assert.Equal(t, "JPY", reserved[0].Quote)
+
+	// Verify state transitions via direct SQL — no queue.Job field additions needed.
+	var (
+		dbStatus     string
+		dbLeaseUntil time.Time
+	)
+	err = pool.QueryRow(context.Background(),
+		`SELECT status, lease_until FROM quote_jobs WHERE id = $1`,
+		string(reserved[0].ID),
+	).Scan(&dbStatus, &dbLeaseUntil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "running", dbStatus)
+	assert.False(t, dbLeaseUntil.IsZero(), "lease_until must be set after Reserve")
+	assert.True(t, dbLeaseUntil.After(clk.Now()), "lease_until must be in the future relative to clock")
 }
 
 // TestEnqueue_CoalescingCounterIncrements asserts that the second Enqueue of

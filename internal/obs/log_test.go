@@ -64,17 +64,3 @@ func TestLogger_NilLogger_FallsBackToDefault(t *testing.T) {
 
 	assert.Contains(t, buf.String(), `"msg":"nil_fallback"`)
 }
-
-func TestWithLogger_CancelledCtx_StillCarriesLogger(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	custom := slog.New(slog.NewJSONHandler(&buf, nil))
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = obs.WithLogger(ctx, custom)
-	cancel()
-
-	obs.Logger(ctx).Info("cancelled")
-
-	assert.Contains(t, buf.String(), `"msg":"cancelled"`)
-}

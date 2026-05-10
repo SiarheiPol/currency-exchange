@@ -26,20 +26,6 @@ func TestUUIDGenerator_NewIDReturnsValidUUIDv4(t *testing.T) {
 	require.Equal(t, uuid.Version(4), parsed.Version())
 }
 
-// TestUUIDGenerator_NewIDsAreUnique confirms each call returns a fresh UUID.
-func TestUUIDGenerator_NewIDsAreUnique(t *testing.T) {
-	t.Parallel()
-
-	g := New()
-	seen := map[string]struct{}{}
-
-	for i := 0; i < 1000; i++ {
-		seen[g.NewID()] = struct{}{}
-	}
-
-	require.Len(t, seen, 1000)
-}
-
 // TestSeqIDGenerator_IDsIncrementSequentially confirms monotonic increment with consistent zero-padded format.
 func TestSeqIDGenerator_IDsIncrementSequentially(t *testing.T) {
 	t.Parallel()

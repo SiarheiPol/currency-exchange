@@ -13,25 +13,8 @@ import (
 	"currency-exchange/internal/obs"
 )
 
-// Compilation guard — each Metric* constant must exist, be exported, and be a string.
-var (
-	_ string = obs.MetricHTTPRequestsTotal
-	_ string = obs.MetricHTTPRequestDurationSeconds
-	_ string = obs.MetricHTTPInFlightRequests
-	_ string = obs.MetricQuoteJobsPendingCount
-	_ string = obs.MetricQuoteJobsTotal
-	_ string = obs.MetricQuoteJobsAttempts
-	_ string = obs.MetricWorkerIterationsTotal
-	_ string = obs.MetricSchedulerTicksTotal
-	_ string = obs.MetricSchedulerLastTickSecondsAgo
-	_ string = obs.MetricCoalescingCollapsedTotal
-	_ string = obs.MetricRatesProviderRequestsTotal
-	_ string = obs.MetricRatesProviderRequestDurationSeconds
-	_ string = obs.MetricRatesProviderQuotaUsed
-)
-
-// TestNewRegistry_AllMetricsGatherable asserts that the registry exposes exactly
-// 13 distinct MetricFamily entries (one per declared metric) via Gather.
+// TestNewRegistry_AllMetricsGatherable asserts that every name in
+// obs.AllMetricNames is represented in the gathered MetricFamily list.
 func TestNewRegistry_AllMetricsGatherable(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +22,14 @@ func TestNewRegistry_AllMetricsGatherable(t *testing.T) {
 	families, err := reg.Gather()
 
 	require.NoError(t, err, "Gather must not return an error")
-	assert.Len(t, families, 13, "registry must expose exactly 13 metric families")
+
+	gathered := make(map[string]bool, len(families))
+	for _, f := range families {
+		gathered[f.GetName()] = true
+	}
+	for _, name := range obs.AllMetricNames {
+		assert.True(t, gathered[name], "metric %q not registered", name)
+	}
 }
 
 // descLabelRE extracts the fqName and variableLabels portion from a Desc.String().

@@ -56,6 +56,25 @@ const (
 	MetricRatesProviderQuotaUsed = "rates_provider_quota_used"
 )
 
+// AllMetricNames is the canonical enumeration of every Prometheus metric name
+// registered by this package. Tests use it to assert exhaustive coverage
+// without hardcoding a count.
+var AllMetricNames = []string{
+	MetricHTTPRequestsTotal,
+	MetricHTTPRequestDurationSeconds,
+	MetricHTTPInFlightRequests,
+	MetricQuoteJobsPendingCount,
+	MetricQuoteJobsTotal,
+	MetricQuoteJobsAttempts,
+	MetricWorkerIterationsTotal,
+	MetricSchedulerTicksTotal,
+	MetricSchedulerLastTickSecondsAgo,
+	MetricCoalescingCollapsedTotal,
+	MetricRatesProviderRequestsTotal,
+	MetricRatesProviderRequestDurationSeconds,
+	MetricRatesProviderQuotaUsed,
+}
+
 // HTTPRequestsTotal counts HTTP requests partitioned by method, path, and
 // response status code. Use WithLabelValues to record observations.
 var HTTPRequestsTotal *prometheus.CounterVec
