@@ -45,8 +45,10 @@ Three common approaches in the Go ecosystem:
 `go generate` is wired via a directive in a single file (e.g. `internal/api/generate.go`):
 
 ```go
-//go:generate go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen -config oapi-codegen.yaml ../../api/openapi.yaml
+//go:generate go tool oapi-codegen -config ../../api/oapi-codegen.yaml ../../api/openapi.yaml
 ```
+
+The `oapi-codegen` binary is pinned in `go.mod` via the Go 1.24+ `tool` directive (same pattern as `golang-migrate` — see `conventions.md`). This keeps a single tool-pinning style across the repo and ensures transitive dependencies of the codegen tool are recorded in `go.sum`.
 
 `make generate` wraps this for humans and agents alike.
 
