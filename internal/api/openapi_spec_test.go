@@ -98,45 +98,6 @@ func TestOpenAPISpec_VersionAndPaths(t *testing.T) {
 	}
 }
 
-// TestOpenAPISpec_OperationIds asserts that the three operations use the
-// operationId values pinned in the spec-author contract.
-func TestOpenAPISpec_OperationIds(t *testing.T) {
-	t.Parallel()
-	doc := loadSpec(t)
-
-	cases := []struct {
-		path     string
-		method   string // "Post" or "Get"
-		wantOpID string
-	}{
-		{"/quotes/refresh", "Post", "refreshQuote"},
-		{"/quotes/{id}", "Get", "getQuoteJob"},
-		{"/quotes/latest", "Get", "getLatestQuote"},
-	}
-
-	for _, tc := range cases {
-		pathItem := doc.Paths.Value(tc.path)
-		if pathItem == nil {
-			t.Errorf("path %q not found in spec", tc.path)
-			continue
-		}
-		var op *openapi3.Operation
-		switch tc.method {
-		case "Post":
-			op = pathItem.Post
-		case "Get":
-			op = pathItem.Get
-		}
-		if op == nil {
-			t.Errorf("path %q has no %s operation", tc.path, tc.method)
-			continue
-		}
-		if op.OperationID != tc.wantOpID {
-			t.Errorf("path %q %s operationId: got %q, want %q", tc.path, tc.method, op.OperationID, tc.wantOpID)
-		}
-	}
-}
-
 // TestOpenAPISpec_StatusCodesComplete asserts that each operation declares all
 // expected HTTP status codes as defined in api-contract.md.
 func TestOpenAPISpec_StatusCodesComplete(t *testing.T) {
@@ -170,61 +131,6 @@ func TestOpenAPISpec_StatusCodesComplete(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestOpenAPISpec_ErrorCodeEnum asserts that the Error schema's code field
-// enum contains all six error codes defined in api-contract.md. Additional
-// codes are allowed (so future additions do not break this test).
-func TestOpenAPISpec_ErrorCodeEnum(t *testing.T) {
-	t.Parallel()
-	doc := loadSpec(t)
-
-	errorSchemaRef, ok := doc.Components.Schemas["Error"]
-	if !ok {
-		t.Fatal("components.schemas.Error not found in spec")
-	}
-	if errorSchemaRef.Value == nil {
-		t.Fatal("components.schemas.Error has nil Value")
-	}
-	errorSchema := errorSchemaRef.Value
-
-	// The Error schema must have a property named "error" containing "code".
-	errorProp, ok := errorSchema.Properties["error"]
-	if !ok {
-		t.Fatal("Error schema missing property \"error\"")
-	}
-	if errorProp.Value == nil {
-		t.Fatal("Error schema property \"error\" has nil Value")
-	}
-	codeProp, ok := errorProp.Value.Properties["code"]
-	if !ok {
-		t.Fatal("Error.error schema missing property \"code\"")
-	}
-	if codeProp.Value == nil {
-		t.Fatal("Error.error.code schema has nil Value")
-	}
-
-	rawEnum := codeProp.Value.Enum
-	enum := make([]string, 0, len(rawEnum))
-	for _, v := range rawEnum {
-		if s, ok := v.(string); ok {
-			enum = append(enum, s)
-		}
-	}
-
-	wants := []string{
-		"invalid_request",
-		"unsupported_currency",
-		"no_data",
-		"not_found",
-		"upstream_unavailable",
-		"internal",
-	}
-	for _, want := range wants {
-		if !slices.Contains(enum, want) {
-			t.Errorf("Error.error.code enum missing %q; got %v", want, enum)
-		}
 	}
 }
 

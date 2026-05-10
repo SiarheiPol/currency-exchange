@@ -103,9 +103,9 @@ Refresh-path code, scheduler, real upstream client.
 HTTP handlers, OpenAPI spec, contract enforcement.
 
 - [x] `api/openapi.yaml` — full spec for 3 endpoints (request/response/errors/headers) — see `api-contract.md`
-- [ ] `oapi-codegen` wired in `go generate` — see `openapi.md`
-- [ ] `internal/api/oapi_gen.go` checked in
-- [ ] `make check` includes `git diff --exit-code` after `go generate`
+- [x] `oapi-codegen` wired in `go generate` — see `openapi.md`
+- [x] `internal/api/oapi_gen.go` checked in
+- [x] `make check` includes `git diff --exit-code` after `go generate`
 - [ ] Handler implementations satisfying generated `ServerInterface`
 - [ ] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`
 - [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /quotes/latest?base=BASE&quote=QUOTE` (`max-age=W`)
