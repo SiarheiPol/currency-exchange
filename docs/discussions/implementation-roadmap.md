@@ -74,7 +74,7 @@ Logging, metrics, health endpoints. Lands before HTTP handlers because handlers 
   - [x] `PostgresChecker` (hard, via `Ping(ctx)`)
   - [x] `WorkerChecker` (soft, via `Worker.LastIteration` heartbeat)
   - [x] mounted in `cmd/server` with real `pgxpool.Pool` + running `worker.Worker`
-  - [ ] `SchedulerChecker` — deferred to Stage 3 alongside the scheduler component itself
+  - [x] `SchedulerChecker` — deferred to Stage 3 alongside the scheduler component itself
 - [x] Retrofit `pgQueue`, `memQueue`, contract tests with logger and metrics
 
 ---
@@ -88,13 +88,13 @@ Refresh-path code, scheduler, real upstream client.
 - [x] `fakeRatesProvider` for tests (three test patterns: success / batch-failure / partial-success with missing-pair detection)
 - [x] `apilayerProvider` (real implementation; per-base HTTP grouping; `httptest`-based unit tests) — see `apilayer-spec.md` for endpoint, response shapes, and error-code mapping
 - [x] Worker loop calling `FetchPairs` and upserting `quotes(base, quote)` in one transaction
-- [ ] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
-- [ ] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
+- [x] Scheduler component + bootstrap-on-startup tick; iterates over all ordered pairs from whitelist
+- [x] Coalescing: `dedup_key = sha256(UPPER(base) + ":" + UPPER(quote) + ":" + bucket_unix_seconds)` on both producers
 - [x] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
 - [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
 - [x] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
 - [ ] All upstream call paths emit metrics + logs through `internal/obs`
-- [ ] Coalescing-collapse counter incremented on `Enqueue` conflicts
+- [x] Coalescing-collapse counter incremented on `Enqueue` conflicts
 
 ---
 

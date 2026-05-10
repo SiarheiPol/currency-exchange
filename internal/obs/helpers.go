@@ -58,6 +58,14 @@ func LogSchedulerTick(ctx context.Context, currencies []string) {
 	)
 }
 
+// LogSchedulerTickFailed logs a scheduler tick that returned an error from the
+// queue. The Run loop continues; the next tick will retry.
+func LogSchedulerTickFailed(ctx context.Context, err error) {
+	Logger(ctx).LogAttrs(ctx, slog.LevelError, EvSchedulerTick,
+		slog.String("error", err.Error()),
+	)
+}
+
 // LogUpstreamCallStarted logs the beginning of an upstream provider call.
 func LogUpstreamCallStarted(ctx context.Context, provider string, currencies []string) {
 	Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvUpstreamCallStarted,
