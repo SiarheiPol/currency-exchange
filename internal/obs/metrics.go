@@ -54,6 +54,10 @@ const (
 	// MetricRatesProviderQuotaUsed tracks the quota consumed per provider and
 	// quota period.
 	MetricRatesProviderQuotaUsed = "rates_provider_quota_used"
+
+	// MetricRatesProviderResponseAnomaliesTotal counts response anomalies in
+	// upstream rates provider responses, partitioned by provider and anomaly kind.
+	MetricRatesProviderResponseAnomaliesTotal = "rates_provider_response_anomalies_total"
 )
 
 // AllMetricNames is the canonical enumeration of every Prometheus metric name
@@ -73,6 +77,7 @@ var AllMetricNames = []string{
 	MetricRatesProviderRequestsTotal,
 	MetricRatesProviderRequestDurationSeconds,
 	MetricRatesProviderQuotaUsed,
+	MetricRatesProviderResponseAnomaliesTotal,
 }
 
 // HTTPRequestsTotal counts HTTP requests partitioned by method, path, and
@@ -122,6 +127,10 @@ var RatesProviderRequestDurationSeconds *prometheus.HistogramVec
 // RatesProviderQuotaUsed tracks the quota consumed per rates provider and
 // quota period.
 var RatesProviderQuotaUsed *prometheus.GaugeVec
+
+// RatesProviderResponseAnomaliesTotal counts response anomalies in upstream
+// rates provider responses partitioned by provider and anomaly kind.
+var RatesProviderResponseAnomaliesTotal *prometheus.CounterVec
 
 // defaultRegistry is the package-level singleton registry. It is created once
 // in init and returned by every NewRegistry call.
@@ -203,6 +212,12 @@ func init() {
 	}, []string{"provider", "period"})
 	RatesProviderQuotaUsed.WithLabelValues("", "")
 
+	RatesProviderResponseAnomaliesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: MetricRatesProviderResponseAnomaliesTotal,
+		Help: "Total number of response anomalies in upstream rates provider responses partitioned by provider and kind.",
+	}, []string{"provider", "kind"})
+	RatesProviderResponseAnomaliesTotal.WithLabelValues("", "")
+
 	defaultRegistry.MustRegister(
 		HTTPRequestsTotal,
 		HTTPRequestDurationSeconds,
@@ -217,10 +232,11 @@ func init() {
 		RatesProviderRequestsTotal,
 		RatesProviderRequestDurationSeconds,
 		RatesProviderQuotaUsed,
+		RatesProviderResponseAnomaliesTotal,
 	)
 }
 
-// NewRegistry returns the package-level singleton *prometheus.Registry. All 13
+// NewRegistry returns the package-level singleton *prometheus.Registry. All 14
 // service collectors are pre-registered and pre-initialised. Callers must not
 // register additional collectors into this registry; use the exported package
 // variables (e.g. obs.HTTPRequestsTotal) to record observations.

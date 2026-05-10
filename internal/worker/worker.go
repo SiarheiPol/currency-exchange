@@ -177,12 +177,14 @@ func (w *Worker) handleBatchError(ctx context.Context, job queue.Job, err error)
 
 	switch pe.Code {
 	case "quota_exceeded":
-		delay := time.Hour
-		if rErr := w.q.Reschedule(ctx, job.ID, pe.Error(), delay); rErr != nil {
+		const quotaExceededDelay = time.Hour
+		retryAt := w.clk.Now().Add(quotaExceededDelay)
+		if rErr := w.q.Reschedule(ctx, job.ID, pe.Error(), quotaExceededDelay); rErr != nil {
 			obs.LogWorkerOpFailed(ctx, "reschedule", rErr)
 		} else {
 			attempts := job.Attempts + 1
-			obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, delay)
+			obs.LogJobRescheduled(ctx, string(job.ID), job.Base, job.Quote, attempts, quotaExceededDelay)
+			obs.LogProviderQuotaExceeded(ctx, "apilayer", retryAt)
 		}
 
 	case "transient":

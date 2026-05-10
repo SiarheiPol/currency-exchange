@@ -14,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"currency-exchange/internal/clock"
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/ratesprovider"
 )
 
@@ -79,6 +80,9 @@ func (p *Provider) FetchPairs(ctx context.Context, pairs []ratesprovider.Pair) (
 			targetList = append(targetList, t)
 		}
 
+		obs.LogUpstreamCallStarted(ctx, "apilayer", targetList)
+		start := time.Now()
+
 		// Build request URL.
 		params := url.Values{}
 		params.Set("access_key", p.APIKey)
@@ -88,67 +92,94 @@ func (p *Provider) FetchPairs(ctx context.Context, pairs []ratesprovider.Pair) (
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
-			return ratesprovider.FetchResult{}, &ratesprovider.ProviderError{
+			duration := time.Since(start)
+			provErr := &ratesprovider.ProviderError{
 				Code:    "transient",
 				Cause:   err,
 				Message: "http request failed",
 			}
+			obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "transient").Inc()
+			obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+			obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, provErr)
+			return ratesprovider.FetchResult{}, provErr
 		}
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return ratesprovider.FetchResult{}, &ratesprovider.ProviderError{
+			duration := time.Since(start)
+			provErr := &ratesprovider.ProviderError{
 				Code:    "transient",
 				Cause:   err,
 				Message: "http request failed",
 			}
+			obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "transient").Inc()
+			obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+			obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, provErr)
+			return ratesprovider.FetchResult{}, provErr
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return ratesprovider.FetchResult{}, &ratesprovider.ProviderError{
+			duration := time.Since(start)
+			provErr := &ratesprovider.ProviderError{
 				Code:     "transient",
 				HTTPCode: resp.StatusCode,
 				Message:  "http error response",
 			}
+			obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "transient").Inc()
+			obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+			obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, provErr)
+			return ratesprovider.FetchResult{}, provErr
 		}
 
 		var apiResp apiResponse
 		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 			_ = resp.Body.Close()
-			return ratesprovider.FetchResult{}, &ratesprovider.ProviderError{
+			duration := time.Since(start)
+			provErr := &ratesprovider.ProviderError{
 				Code:    "transient",
 				Cause:   err,
 				Message: "malformed response body",
 			}
+			obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "transient").Inc()
+			obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+			obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, provErr)
+			return ratesprovider.FetchResult{}, provErr
 		}
 		_ = resp.Body.Close()
 
 		if !apiResp.Success {
-			var code string
 			apiCode := 0
 			var message string
 			if apiResp.Error != nil {
 				apiCode = apiResp.Error.Code
 				message = apiResp.Error.Info
 			}
+			var outcome string
 			switch apiCode {
 			case 104:
-				code = "quota_exceeded"
+				outcome = "quota_exceeded"
 			default:
-				code = "permanent"
+				outcome = "permanent"
 			}
-			return ratesprovider.FetchResult{}, &ratesprovider.ProviderError{
-				Code:    code,
+			duration := time.Since(start)
+			provErr := &ratesprovider.ProviderError{
+				Code:    outcome,
 				APICode: apiCode,
 				Message: message,
 			}
+			obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", outcome).Inc()
+			obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+			obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, provErr)
+			return ratesprovider.FetchResult{}, provErr
 		}
 
 		// Parse quotes: each key is <base><target> (6 chars).
 		fetchedAt := time.Unix(apiResp.Timestamp, 0)
 		for key, price := range apiResp.Quotes {
 			if len(key) != 6 {
+				obs.RatesProviderResponseAnomaliesTotal.WithLabelValues("apilayer", "malformed_quote_key").Inc()
+				obs.LogProviderResponseAnomaly(ctx, "apilayer", "malformed_quote_key", key)
 				continue
 			}
 			keyBase := key[:3]
@@ -163,6 +194,11 @@ func (p *Provider) FetchPairs(ctx context.Context, pairs []ratesprovider.Pair) (
 				FetchedAt: fetchedAt,
 			}
 		}
+
+		duration := time.Since(start)
+		obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok").Inc()
+		obs.RatesProviderRequestDurationSeconds.WithLabelValues("apilayer").Observe(duration.Seconds())
+		obs.LogUpstreamCallFinished(ctx, "apilayer", targetList, duration, nil)
 	}
 
 	// Compute Missing: deduplicated set of input pairs absent from Quotes.

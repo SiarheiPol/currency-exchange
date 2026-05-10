@@ -11,8 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
+	"currency-exchange/internal/obs"
 	"currency-exchange/internal/ratesprovider"
 	"currency-exchange/internal/ratesprovider/apilayer"
 )
@@ -560,4 +564,218 @@ func TestProvider_RequestShape(t *testing.T) {
 	require.Equal(t, "USD", capturedQuery["source"])
 	require.ElementsMatch(t, []string{"EUR", "MXN"}, capturedCurrencies)
 	require.Equal(t, 0, capturedBodyLength)
+}
+
+// ---------------------------------------------------------------------------
+// Metrics tests — NOT t.Parallel() at the outer level.
+//
+// These tests read from global Prometheus counter/histogram singletons
+// (obs.RatesProviderRequestsTotal, obs.RatesProviderResponseAnomaliesTotal,
+// obs.RatesProviderRequestDurationSeconds). Running them concurrently with
+// each other — or with the parallel tests above that also call FetchPairs —
+// would produce non-deterministic counter deltas. They are intentionally
+// sequential so that before/after delta assertions are exact.
+// ---------------------------------------------------------------------------
+
+// TestProvider_OutcomeLabel_Mapping (TA1) asserts that FetchPairs increments
+// RatesProviderRequestsTotal with the correct outcome label for each of the
+// four possible outcomes: "ok", "transient", "permanent", "quota_exceeded".
+func TestProvider_OutcomeLabel_Mapping(t *testing.T) {
+	cases := []struct {
+		name        string
+		handler     http.HandlerFunc
+		wantOutcome string
+	}{
+		{
+			name: "ok",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(successBody("USD", 1778354527, map[string]float64{
+					"USDEUR": 0.84804,
+				})))
+			},
+			wantOutcome: "ok",
+		},
+		{
+			name: "transient",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantOutcome: "transient",
+		},
+		{
+			name: "permanent",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(errorBody(101, "x")))
+			},
+			wantOutcome: "permanent",
+		},
+		{
+			name: "quota_exceeded",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(errorBody(104, "x")))
+			},
+			wantOutcome: "quota_exceeded",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
+
+			p := newProvider(t, srv)
+
+			before := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", tc.wantOutcome))
+			_, _ = p.FetchPairs(context.Background(), []ratesprovider.Pair{{Base: "USD", Quote: "EUR"}})
+			after := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", tc.wantOutcome))
+
+			require.Equal(t, float64(1), after-before,
+				"RatesProviderRequestsTotal{provider=apilayer, outcome=%s} must increment by 1", tc.wantOutcome)
+		})
+	}
+}
+
+// TestProvider_PerHTTPCallGranularity_TwoBases (TA2) asserts that each
+// per-base HTTP call increments the counter independently: two bases → delta +2
+// on the "ok" outcome label.
+func TestProvider_PerHTTPCallGranularity_TwoBases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		source := r.URL.Query().Get("source")
+		w.Header().Set("Content-Type", "application/json")
+		switch source {
+		case "EUR":
+			_, _ = w.Write([]byte(successBody("EUR", 1778354527, map[string]float64{
+				"EURUSD": 1.18,
+			})))
+		case "USD":
+			_, _ = w.Write([]byte(successBody("USD", 1778354527, map[string]float64{
+				"USDEUR": 0.84,
+			})))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	p := newProvider(t, srv)
+
+	beforeOK := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok"))
+	_, err := p.FetchPairs(context.Background(), []ratesprovider.Pair{
+		{Base: "EUR", Quote: "USD"},
+		{Base: "USD", Quote: "EUR"},
+	})
+	require.NoError(t, err)
+	afterOK := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok"))
+
+	require.Equal(t, float64(2), afterOK-beforeOK,
+		"two base currencies → two HTTP calls → counter must increment by 2")
+}
+
+// histogramSampleCount reads the current SampleCount from a HistogramVec for
+// the given label values. It uses prometheus.Histogram.Write to extract the
+// internal dto.Metric without a full registry Gather, keeping the helper
+// self-contained and fast.
+func histogramSampleCount(vec *prometheus.HistogramVec, labelValues ...string) uint64 {
+	h := vec.WithLabelValues(labelValues...)
+	var m dto.Metric
+	_ = h.(prometheus.Histogram).Write(&m)
+	if m.Histogram != nil && m.Histogram.SampleCount != nil {
+		return *m.Histogram.SampleCount
+	}
+	return 0
+}
+
+// TestProvider_DurationHistogram_Observed (TA3) asserts that a successful
+// FetchPairs call records exactly one observation in
+// RatesProviderRequestDurationSeconds for the "apilayer" provider label.
+func TestProvider_DurationHistogram_Observed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successBody("USD", 1778354527, map[string]float64{
+			"USDEUR": 0.84804,
+		})))
+	}))
+	defer srv.Close()
+
+	p := newProvider(t, srv)
+
+	beforeCount := histogramSampleCount(obs.RatesProviderRequestDurationSeconds, "apilayer")
+	_, err := p.FetchPairs(context.Background(), []ratesprovider.Pair{{Base: "USD", Quote: "EUR"}})
+	require.NoError(t, err)
+	afterCount := histogramSampleCount(obs.RatesProviderRequestDurationSeconds, "apilayer")
+
+	require.Equal(t, uint64(1), afterCount-beforeCount,
+		"RatesProviderRequestDurationSeconds{provider=apilayer} must record one observation per HTTP call")
+}
+
+// TestProvider_MalformedQuoteKey_AnomalyCounter (TA4) asserts that a response
+// containing a quote key that is not exactly 6 characters increments
+// RatesProviderResponseAnomaliesTotal{kind="malformed_quote_key"} by 1, while
+// the valid 6-char key still populates FetchResult.Quotes.
+func TestProvider_MalformedQuoteKey_AnomalyCounter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// "USDE" is 4 chars — malformed; "USDEUR" is valid.
+		_, _ = w.Write([]byte(successBody("USD", 1778354527, map[string]float64{
+			"USDE":   0.84,
+			"USDEUR": 0.84804,
+		})))
+	}))
+	defer srv.Close()
+
+	p := newProvider(t, srv)
+
+	before := testutil.ToFloat64(obs.RatesProviderResponseAnomaliesTotal.WithLabelValues("apilayer", "malformed_quote_key"))
+	result, err := p.FetchPairs(context.Background(), []ratesprovider.Pair{{Base: "USD", Quote: "EUR"}})
+	after := testutil.ToFloat64(obs.RatesProviderResponseAnomaliesTotal.WithLabelValues("apilayer", "malformed_quote_key"))
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), after-before,
+		"RatesProviderResponseAnomaliesTotal{kind=malformed_quote_key} must increment by 1 for the 4-char key")
+	_, hasEURUSD := result.Quotes[ratesprovider.Pair{Base: "USD", Quote: "EUR"}]
+	require.True(t, hasEURUSD, "valid 6-char key USDEUR must still appear in Quotes")
+}
+
+// TestProvider_FailFast_OnlyFirstCallIncrementsCounter (TA5) asserts that when
+// the first base (EUR, lexically) returns a quota_exceeded error, the counter
+// increments by 1 for quota_exceeded and by 0 for ok — the USD call never
+// happens due to fail-fast behaviour.
+func TestProvider_FailFast_OnlyFirstCallIncrementsCounter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		source := r.URL.Query().Get("source")
+		w.Header().Set("Content-Type", "application/json")
+		switch source {
+		case "EUR":
+			_, _ = w.Write([]byte(errorBody(104, "quota")))
+		case "USD":
+			_, _ = w.Write([]byte(successBody("USD", 1778354527, map[string]float64{
+				"USDEUR": 0.84,
+			})))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	p := newProvider(t, srv)
+
+	beforeQE := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "quota_exceeded"))
+	beforeOK := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok"))
+
+	_, _ = p.FetchPairs(context.Background(), []ratesprovider.Pair{
+		{Base: "EUR", Quote: "USD"},
+		{Base: "USD", Quote: "EUR"},
+	})
+
+	afterQE := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "quota_exceeded"))
+	afterOK := testutil.ToFloat64(obs.RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok"))
+
+	require.Equal(t, float64(1), afterQE-beforeQE,
+		"quota_exceeded counter must increment by 1 for the EUR call")
+	require.Equal(t, float64(0), afterOK-beforeOK,
+		"ok counter must not increment — USD call must not have happened (fail-fast)")
 }

@@ -93,7 +93,7 @@ Refresh-path code, scheduler, real upstream client.
 - [x] Job lifecycle wiring: `pending` → `running` → `done` | `failed` (via `Reschedule` retry budget)
 - [ ] Startup probe: `FetchPairs([{USD,EUR}])` parses `success` boolean in response body
 - [x] Missing-pair detection in `apilayerProvider`: pairs absent from upstream response populate `FetchResult.Missing`
-- [ ] All upstream call paths emit metrics + logs through `internal/obs`
+- [x] All upstream call paths emit metrics + logs through `internal/obs`
 - [x] Coalescing-collapse counter incremented on `Enqueue` conflicts
 
 ---

@@ -128,3 +128,25 @@ func LogWorkerOpFailed(ctx context.Context, op string, err error) {
 		slog.String("error", err.Error()),
 	)
 }
+
+// LogProviderQuotaExceeded logs that an upstream provider returned a quota-
+// exceeded signal and the worker is rescheduling. retryAt is the absolute time
+// the job will next be eligible to run.
+func LogProviderQuotaExceeded(ctx context.Context, provider string, retryAt time.Time) {
+	Logger(ctx).LogAttrs(ctx, slog.LevelWarn, EvProviderQuotaExceeded,
+		slog.String("provider", provider),
+		slog.Time("retry_at", retryAt),
+	)
+}
+
+// LogProviderResponseAnomaly logs a per-occurrence anomaly in an upstream
+// provider response (e.g. a malformed quotes key). detail carries the offending
+// value so a single log line is enough to diagnose without correlating with
+// other sources.
+func LogProviderResponseAnomaly(ctx context.Context, provider, kind, detail string) {
+	Logger(ctx).LogAttrs(ctx, slog.LevelWarn, EvProviderResponseAnomaly,
+		slog.String("provider", provider),
+		slog.String("kind", kind),
+		slog.String("detail", detail),
+	)
+}
