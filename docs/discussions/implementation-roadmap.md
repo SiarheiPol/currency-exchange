@@ -199,9 +199,9 @@ These are designed but explicitly deferred. Each becomes a stage on its own when
 - **OpenTelemetry distributed tracing** alongside `X-Request-Id` — see `monitoring.md`.
 - **Property-based testing** for bucket math and dedup logic — see `testing-strategy.md`.
 - **Load and stress tests** — uses the fake rates provider from Stage 5 to simulate Enterprise-tier quota and update cadence. See `load-testing.md`. Tracked sub-items:
-  - [ ] Load-test infrastructure: k6 service in `docker-compose.yml` under the `loadtest` profile, `loadtest/` scripts directory with shared `common.js`, Makefile targets
-  - [ ] Profile 1 smoke (sustained baseline): 50 RPS mixed `GET /quotes/latest` + `POST /quotes/refresh`, 80/20 ratio, 30 s default with override env, threshold pass/fail
-  - [ ] Profile 4 smoke (coalescing stress): 100 VU burst on a single pair, assert `rates_provider_requests_total` delta ≤ 2 by parsing `/metrics`
+  - [x] Load-test infrastructure: k6 service in `docker-compose.yml` under the `loadtest` profile, `loadtest/` scripts directory with shared `common.js`, Makefile targets
+  - [x] Profile 1 smoke (sustained baseline): 50 RPS mixed `GET /quotes/latest` + `POST /quotes/refresh`, 80/20 ratio, 30 s default with override env, threshold pass/fail
+  - [x] Profile 4 smoke (coalescing stress): 100 VU burst on a single pair, assert `rates_provider_requests_total` delta ≤ 2 by parsing `/metrics`
   - [ ] Profile 2 smoke (read storm): `GET /quotes/latest` at high RPS, scalability check
   - [ ] Profile 3 smoke (refresh burst): sustained `POST /quotes/refresh` across distinct pairs, queue drain
   - [ ] Profile 5 (failure injection): fake-provider latency + error modes, resilience check

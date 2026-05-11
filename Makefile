@@ -3,7 +3,8 @@
         run run-fakeprovider \
         migrate-up migrate-down \
         docker-build-server docker-build-fakeprovider \
-        compose-validate
+        compose-validate \
+        loadtest loadtest-coalesce
 
 COVERAGE_FILE ?= coverage.out
 
@@ -64,3 +65,12 @@ compose-validate:
 	docker compose config --quiet
 	docker run --rm --entrypoint="" -v "$(PWD)/deploy/prometheus:/etc/prometheus:ro" \
 		prom/prometheus:v2.55.1 promtool check config /etc/prometheus/prometheus.yml
+
+loadtest:
+	docker compose --profile loadtest run --rm \
+		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
+		k6 run /scripts/profile1.js
+
+loadtest-coalesce:
+	docker compose --profile loadtest run --rm \
+		k6 run /scripts/profile4.js

@@ -130,6 +130,18 @@ make coverage            # writes coverage.out
 make coverage-html       # writes coverage.html
 ```
 
+### Load tests (k6)
+
+Smoke-tier load tests live in `loadtest/`. They run inside the Compose stack via the `loadtest` profile (no host k6 install required):
+
+```bash
+make loadtest                            # profile 1: sustained 50 RPS, 30s
+make loadtest-coalesce                   # profile 4: 100-VU burst, coalescing assertion
+LOADTEST_DURATION=30m make loadtest      # full-tier override
+```
+
+The k6 service brings up the entire stack on first run (postgres + migrate + fakeprovider + server + prometheus + grafana). Open Grafana at `http://localhost:3000` during or after a run to watch the dashboards. See [`loadtest/README.md`](loadtest/README.md) and [`docs/discussions/load-testing.md`](docs/discussions/load-testing.md) for profile details and the full roadmap.
+
 ## Migrations
 
 ```bash

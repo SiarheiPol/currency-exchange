@@ -100,6 +100,18 @@ services:
       timeout: 3s
       retries: 5
 
+  k6:
+    image: grafana/k6:0.55.0
+    profiles: ["loadtest"]
+    depends_on:
+      - server
+      - prometheus
+      - grafana
+    volumes:
+      - ./loadtest:/scripts:ro
+    networks:
+      - default
+
 volumes:
   pgdata:
   prometheus_data:
