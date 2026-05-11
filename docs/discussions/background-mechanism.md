@@ -50,7 +50,10 @@ type Job struct {
 type JobQueue interface {
     Enqueue(ctx context.Context, j Job) (JobID, bool, error) // returns (id, inserted, err); inserted=false on dedup conflict
     Reserve(ctx context.Context, n int, lease time.Duration) ([]Job, error)
-    Complete(ctx context.Context, id JobID) error
+    // Complete carries the fetched price snapshot so the job row owns its own
+    // result. See `quote_jobs` schema below: the row stores price and
+    // quote_updated_at, independent of the mutable `quotes` cache.
+    Complete(ctx context.Context, id JobID, price decimal.Decimal, quoteUpdatedAt time.Time) error
     Reschedule(ctx context.Context, id JobID, reason string, after time.Duration) error
     Fail(ctx context.Context, id JobID, reason string) error
 }
@@ -88,7 +91,12 @@ CREATE TABLE quote_jobs (
     completed_at TIMESTAMPTZ,
     last_error   TEXT
         CONSTRAINT last_error_length CHECK (last_error IS NULL OR length(last_error) <= 4096),
-    CONSTRAINT no_self_pair CHECK (base <> quote)
+    price            NUMERIC,
+    quote_updated_at TIMESTAMPTZ,
+    CONSTRAINT no_self_pair CHECK (base <> quote),
+    CONSTRAINT done_has_quote CHECK (
+        (status = 'done') = (price IS NOT NULL AND quote_updated_at IS NOT NULL)
+    )
 );
 
 CREATE INDEX quote_jobs_pending_idx
@@ -101,6 +109,8 @@ CREATE UNIQUE INDEX quote_jobs_dedup_key_uidx
 ```
 
 `dedup_key` is `NULL` when coalescing is disabled. The partial unique index lets many `NULL` rows coexist while uniqueness is enforced for real keys. The full coalescing rules live in `idempotency.md`.
+
+**Why `price` and `quote_updated_at` live on the job row.** The `quotes` table below is overwritten on every successful fetch (scheduler tick or another refresh job for the same pair). `GET /quotes/:id` for a `done` job, however, advertises `Cache-Control: immutable` (see `api-contract.md > GET /quotes/:id > Cache-Control`): once a job is `done`, its response body must never change. Joining `quote_jobs ⨝ quotes` at GET time would break that promise — the price would silently drift as the cache row is overwritten. Storing the price snapshot on the job row keeps the `done` body immutable for the lifetime of the job, independent of later writes to `quotes`. Both columns are NULL for `pending`/`running`/`failed` rows; the `done_has_quote` CHECK enforces the biconditional `status = 'done' ⇔ (price, quote_updated_at) IS NOT NULL`. Worker passes the values into `Complete(id, price, quote_updated_at)`.
 
 ### `quotes`
 
@@ -249,7 +259,7 @@ Adding a currency without restart is recorded as a Stage 6 enhancement candidate
             updated_at = EXCLUDED.updated_at;
      ```
      This is Postgres "upsert" syntax: insert a new row, and if a row with the same `(base, quote)` pair (the primary key) already exists, update it with the new values. `EXCLUDED` refers to the row that the `INSERT` tried to add. Result: exactly one row per currency pair, always reflecting the latest successful fetch.
-   - `Complete(id)` — `status='done'`, `completed_at=now()`.
+   - `Complete(id, price, quote_updated_at)` — `status='done'`, `completed_at=now()`, `price=$price`, `quote_updated_at=$quote_updated_at`. The job row now owns its own copy of the fetched quote (see the `done_has_quote` invariant above).
 
    The two writes are wrapped in a single transaction, so either both succeed or both roll back. We never leave `quotes` updated without the corresponding `quote_jobs` audit, or vice versa.
 5. **On error.**
