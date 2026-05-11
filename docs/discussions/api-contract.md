@@ -39,7 +39,7 @@ Response headers:
 
 The handler returns as soon as the job is durably enqueued. The actual fetch runs in a worker. `202 Accepted` is used because the request was accepted but the result resource is not yet final.
 
-**Latency contract.** For refresh-driven jobs on a healthy upstream, the p99 of the interval from accepted `POST /quotes/refresh` (the moment this handler returns `202`) to `GET /quotes/:id` reporting `status=done` is bounded by `REFRESH_MAX_LATENCY_SECONDS`. The default is 2s; per-deployment overrides and per-tariff guidance live in `capacity.md > Refresh latency SLA`. The SLI shape (target as p99, exclusions) is defined in `monitoring.md > SLO and SLI thinking`.
+**Latency contract.** For refresh-driven jobs on a healthy upstream, the p99 of the interval from accepted `POST /quotes/refresh` (the moment this handler returns `202`) to `GET /quotes/:id` reporting `status=done` is bounded by `REFRESH_MAX_LATENCY_MS` (an integer count of milliseconds; default `2000`, which produces a 2s SLA). Per-deployment overrides and per-tariff guidance live in `capacity.md > Refresh latency SLA`. The SLI shape (target as p99, exclusions) is defined in `monitoring.md > SLO and SLI thinking`.
 
 Scope and exclusions:
 

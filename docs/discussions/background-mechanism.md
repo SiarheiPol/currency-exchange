@@ -324,7 +324,7 @@ This is the only restart-recovery we need. No special startup scan.
 
 ## Polling
 
-`pollInterval` is **derived from `REFRESH_MAX_LATENCY_SECONDS`**, not a free parameter. The derivation and validation rules live in `capacity.md > Refresh latency SLA > Derived worker parameters`. With the default 2s SLA and apilayer-family p99 latency around 500ms, the resulting `pollInterval` lands at ~1s — small enough that pickup latency does not dominate the SLA budget, large enough that idle polling does not generate noticeable DB load.
+`pollInterval` is **derived from `REFRESH_MAX_LATENCY_MS`**, not a free parameter. The derivation and validation rules live in `capacity.md > Refresh latency SLA > Derived worker parameters`. With the default `REFRESH_MAX_LATENCY_MS=2000` (2s SLA) and apilayer-family p99 latency around 500ms, the resulting `pollInterval` lands at ~1s — small enough that pickup latency does not dominate the SLA budget, large enough that idle polling does not generate noticeable DB load.
 
 ### When to introduce LISTEN/NOTIFY
 
@@ -332,7 +332,7 @@ MVP stays on polling. NOTIFY is a known forward path, not a default — introduc
 
 | Trigger | Why polling stops working |
 |---|---|
-| `REFRESH_MAX_LATENCY_SECONDS < 1s` (typical Enterprise tier) | Polling under 500ms is unstable on Linux — scheduler jitter alone can blow the budget |
+| `REFRESH_MAX_LATENCY_MS < 1000` (typical Enterprise tier) | Polling under 500ms is unstable on Linux — scheduler jitter alone can blow the budget |
 | `WORKER_COUNT > ~8` on one instance | Concurrent `Reserve` calls start contending on the `jobs` table; NOTIFY routes work to one worker per signal |
 | Bursty producer pattern where tail latency on the busiest minute matters | Polling adds `pollInterval/2` average wait even on an otherwise empty queue |
 | Current MVP (2s SLA, K=1, 6 pairs, pollInterval ≈ 1s) | **Polling is sufficient.** Do not introduce NOTIFY. |

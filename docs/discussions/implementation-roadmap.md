@@ -123,19 +123,19 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 
 ## Stage 4.5 — Refresh latency SLA enforcement
 
-Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_SECONDS` (see `api-contract.md > POST /quotes/refresh > Latency contract` and `capacity.md > Refresh latency SLA`). The current `worker.go` defaults (`batchSize=1`, `pollInterval=5s`) cannot meet a 2s SLA by construction, and the per-job loop in `dispatch` negates the per-base batching that `apilayerProvider.FetchPairs` already implements.
+Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_MS` (see `api-contract.md > POST /quotes/refresh > Latency contract` and `capacity.md > Refresh latency SLA`). The current `worker.go` defaults (`batchSize=1`, `pollInterval=5s`) cannot meet a 2s SLA by construction, and the per-job loop in `dispatch` negates the per-base batching that `apilayerProvider.FetchPairs` already implements.
 
-- [ ] `cmd/server/config.go` — read `REFRESH_MAX_LATENCY_SECONDS` (default 2s); refuse to start when `REFRESH_MAX_LATENCY < upstream_p99 + db_p99 + margin` per `capacity.md > Refresh latency SLA > Startup validation`
+- [ ] `cmd/server/config.go` — read `REFRESH_MAX_LATENCY_MS` (integer milliseconds; default `2000`); refuse to start when `REFRESH_MAX_LATENCY_MS < 1000` (the sum `upstream_p99 + db_p99 + margin`) per `capacity.md > Refresh latency SLA > Startup validation`
 - [ ] `cmd/server/config.go` — derive `pollInterval` and `batchSize` from the SLA + whitelist + `WORKER_COUNT`; log the effective values at startup (`derived worker.poll_interval=…, batch_size=…`)
 - [ ] `internal/worker/worker.go` — in the `Reserve` loop, **group reserved jobs by `Base`** before calling `FetchPairs`, then dispatch per-pair results from the batched response. Replaces the current per-job slice-of-one call. Matches the design in `background-mechanism.md > Lifecycle` step 3.
 - [ ] `cmd/server/main.go` — pass derived options to `worker.New(...)` via `WithPollInterval` / `WithBatchSize`; remove hardcoded defaults from `New` once env is the single source of truth
 - [ ] **Job completion SLI plumbing** — covers schema, producer, worker, and metric in one consistent change:
   - `migrations/` — add column `source TEXT NOT NULL` to `quote_jobs` (allowed values: `refresh`, `scheduler`); enforce via `CHECK`
   - `internal/queue/` — `Job.Source` field on the type and on `Enqueue`; producer sets it (`refresh` in the `POST` handler, `scheduler` in `Tick`)
-  - `internal/obs/metrics.go` — register `quote_jobs_completion_seconds` histogram with label `source`; buckets `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (must include `REFRESH_MAX_LATENCY_SECONDS` exactly)
+  - `internal/obs/metrics.go` — register `quote_jobs_completion_seconds` histogram with label `source`; buckets `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (must include `REFRESH_MAX_LATENCY_MS / 1000` exactly as a bucket boundary; the default `2000ms → 2s` is already in the suggested set)
   - `internal/worker/worker.go` — observe `Complete_at − created_at` on first successful `Complete` only; jobs with `attempts > 0` are NOT observed (they belong to job-success metrics)
-  - Acute alert `quote_jobs_completion_seconds{source="refresh"}` p99 > `REFRESH_MAX_LATENCY_SECONDS` for 10m lives in the alerting repo; multi-window burn-rate alerts also there — see `monitoring.md > Alerts (outline)` and `monitoring.md > SLO and SLI thinking > Job completion SLI`
-- [ ] `.env.example` and `README.md` — document `REFRESH_MAX_LATENCY_SECONDS`, note `pollInterval`/`batchSize` are derived
+  - Acute alert `quote_jobs_completion_seconds{source="refresh"}` p99 > `REFRESH_MAX_LATENCY_MS / 1000` for 10m lives in the alerting repo; multi-window burn-rate alerts also there — see `monitoring.md > Alerts (outline)` and `monitoring.md > SLO and SLI thinking > Job completion SLI`
+- [ ] `.env.example` and `README.md` — document `REFRESH_MAX_LATENCY_MS` (integer milliseconds; default `2000`), note `pollInterval`/`batchSize` are derived
 
 ---
 

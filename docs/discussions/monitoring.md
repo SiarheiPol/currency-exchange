@@ -221,7 +221,7 @@ Wireframe, not exact thresholds:
 - `quote_jobs_pending_count` above `whitelist_size × N` (sustained backlog).
 - `rates_provider_quota_used` above 80% of plan limit.
 - `/readyz` failing for more than `M` minutes.
-- `quote_jobs_completion_seconds{source="refresh"}` p99 above `REFRESH_MAX_LATENCY_SECONDS` for 10 minutes (acute SLO breach). Multi-window burn-rate alerts on the same SLI live in the alerting repo — see `SLO and SLI thinking > Job completion SLI`.
+- `quote_jobs_completion_seconds{source="refresh"}` p99 above `REFRESH_MAX_LATENCY_MS / 1000` (the computed seconds threshold) for 10 minutes (acute SLO breach). The alert threshold is derived from `REFRESH_MAX_LATENCY_MS`; the metric and its buckets remain in seconds per Prometheus convention. Multi-window burn-rate alerts on the same SLI live in the alerting repo — see `SLO and SLI thinking > Job completion SLI`.
 
 Thresholds are operational decisions; they go into the alerting repo with the actual rules.
 
@@ -236,14 +236,14 @@ We define the **shape** of SLOs without committing to numbers (numbers come from
   - `T` (scheduler tick) — quiet-traffic cadence.
   - Provider cadence — the external freshness ceiling (Free/Basic = daily, Pro+ = 10min, Business = 60s).
   Realistic SLO target: `2 × T` (one missed tick is acceptable; two is degraded).
-- **Job completion SLI.** p99 of the interval from accepted `POST /quotes/refresh` (handler returns `202`) to the job reaching `status=done`, measured per refresh-driven job. SLO target shape: `p99 ≤ REFRESH_MAX_LATENCY_SECONDS` (default 2s; see `capacity.md > Refresh latency SLA`). Scope:
+- **Job completion SLI.** p99 of the interval from accepted `POST /quotes/refresh` (handler returns `202`) to the job reaching `status=done`, measured per refresh-driven job. SLO target shape: `p99 ≤ REFRESH_MAX_LATENCY_MS / 1000` seconds (default `REFRESH_MAX_LATENCY_MS=2000` → 2s; see `capacity.md > Refresh latency SLA`). Scope:
   - Refresh-driven jobs only. Scheduler-driven cache freshness is covered by the freshness SLI above.
   - Jobs that enter retry/backoff because of transient upstream errors are excluded — they fall under the job-success-rate metric, not latency.
   - Coalesced duplicates are counted once, against the first accepted request in their dedup window (a second `POST` in the same bucket sees the existing job id and shares the same in-flight work).
 
   Underlying metric: `quote_jobs_completion_seconds` (histogram, labelled by `source={refresh,scheduler}`). Implementation contract:
   - Observation = `Complete_at − created_at`, recorded in the worker on the first successful `Complete`. Jobs with `attempts > 0` are excluded from this histogram (they belong to job-success metrics).
-  - Histogram buckets must include `REFRESH_MAX_LATENCY_SECONDS` exactly, plus surrounding values for trend visibility. Suggested set: `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]`.
+  - Histogram buckets are in seconds (Prometheus convention). They must include `REFRESH_MAX_LATENCY_MS / 1000` exactly as a bucket boundary, plus surrounding values for trend visibility. Suggested set: `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (the default `2000ms → 2s` boundary is already present).
   - The `source` label is set at `Enqueue` time by the producer (handler vs scheduler) and persisted on `quote_jobs` — see `background-mechanism.md > Distinguishing refresh-driven from scheduler-driven jobs`.
 
   PromQL for the acute SLO check (used by the alert listed in `Alerts (outline)`):
@@ -253,7 +253,7 @@ We define the **shape** of SLOs without committing to numbers (numbers come from
       sum by (le) (rate(quote_jobs_completion_seconds_bucket{source="refresh"}[5m])))
   ```
 
-  A multi-window error-budget burn-rate alert (1h fast / 6h slow per SRE workbook) lives in the alerting repo, not the service repo: it is parameterised by the deployment's `REFRESH_MAX_LATENCY_SECONDS` and the chosen 30-day SLO compliance target, both of which are operator decisions.
+  A multi-window error-budget burn-rate alert (1h fast / 6h slow per SRE workbook) lives in the alerting repo, not the service repo: it is parameterised by the deployment's `REFRESH_MAX_LATENCY_MS` (converted to seconds: `REFRESH_MAX_LATENCY_MS / 1000`) and the chosen 30-day SLO compliance target, both of which are operator decisions.
 
 When we have data, each SLI gets a target and an error budget. For MVP, the metrics behind these SLIs are emitted; the SLO numbers and burn-rate alerts are filled in later.
 
