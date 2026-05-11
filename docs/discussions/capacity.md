@@ -173,6 +173,8 @@ Container limits to start with:
 
 Adjust based on observed `container_memory_working_set_bytes` and `container_cpu_usage_seconds_total`.
 
+This profile assumes the monolithic `cmd/server` process (api + worker + scheduler in one binary, as goroutines). Splitting roles into separate processes is not the default deployment shape — see `scaling.md > Stage B > Scheduler in multi-instance` for when that becomes worth considering.
+
 ## Log volume
 
 From the discussion in `monitoring.md`: ~250 B per JSON log line, ~5 lines per request.

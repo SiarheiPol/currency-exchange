@@ -45,6 +45,8 @@ One service pod, one Postgres primary. Capacity: ~100–500 RPS depending on con
 
 Triggers for entry: HTTP `p99` rising under load, single-pod restart causing user-visible downtime, or Stage A pod fully utilised.
 
+**Scheduler in multi-instance.** Each pod ticks the scheduler independently. This is a deliberate choice, not an oversight: the unique partial index on `dedup_key` collapses N simultaneous INSERT attempts into one job at the cost of N−1 unique-violation errors per tick. At the expected `N=2–5` and `T=60s` (or larger), this is microseconds of CPU and zero database pressure — cheaper than any coordination mechanism. Alternatives are leader election via `pg_try_advisory_lock` inside `scheduler.Tick`, or splitting roles into separate processes (`--role=api|worker|scheduler`) with `replicas=1` for the scheduler. Consider them only when: (a) pod count exceeds ~10 and dedup-key unique violations become visible in Postgres metrics, (b) api and worker need to be scaled very differently (e.g. upstream-bound load makes extra worker pods useless), or (c) failure-domain isolation between roles becomes a hard requirement. None of these triggers appear within the load envelopes projected in `capacity.md`.
+
 **Upstream-stability caveat.** If multi-instance deployment coincides with recurring upstream failures, retry amplification across pods can hurt the upstream and our quota. In that case, jump to Stage 6 circuit breaker work (`resilience.md > Circuit breaker`) alongside Stage B. At 2–3 pods with stable upstream, the breaker is borderline; at more pods or with frequent outages, it becomes essential.
 
 ### Stage C — read replica for `/latest`
