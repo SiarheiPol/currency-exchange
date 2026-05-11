@@ -153,6 +153,8 @@ func run() error {
 	}()
 
 	mux := http.NewServeMux()
+	mux.Handle("/openapi.json", api.OpenAPIJSONHandler)
+	mux.Handle("/docs/", api.SwaggerUIHandler)
 	mux.Handle("GET /healthz", health.Healthz())
 	mux.Handle("GET /metrics", obs.MetricsHandler())
 	mux.Handle("GET /readyz", health.Readyz(

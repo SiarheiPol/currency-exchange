@@ -46,7 +46,7 @@ Operational endpoints:
 | `/healthz` | liveness — always 200 if process responsive |
 | `/readyz` | readiness — DB ping + scheduler-tick freshness + worker heartbeat |
 | `/metrics` | Prometheus exposition |
-| `/openapi.yaml` | the API spec |
+| `/openapi.json` | the API spec |
 | `/docs/` | Swagger UI |
 
 Detailed contract (request/response shapes, headers, error envelope, edge case matrix) lives in `discussions/api-contract.md`.
