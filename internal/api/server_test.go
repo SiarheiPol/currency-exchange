@@ -5,6 +5,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -19,8 +21,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	api "currency-exchange/internal/api"
+	"currency-exchange/internal/clock"
 	"currency-exchange/internal/httpmw"
+	"currency-exchange/internal/idgen"
 	"currency-exchange/internal/obs"
+	"currency-exchange/internal/queue"
+	"currency-exchange/internal/queue/memqueue"
 )
 
 // Test 1 — compile-time interface check.
@@ -31,22 +37,221 @@ var _ api.ServerInterface = (*api.Handlers)(nil)
 // testWhitelist is the canonical whitelist used across all unit tests.
 var testWhitelist = []string{"USD", "EUR", "MXN"}
 
-// newTestHandler builds the HandlerWithOptions chain used by Tests 2–4.
-// It does NOT include the middleware stack; for that see Test 5.
-func newTestHandler(t *testing.T) http.Handler {
+// testEpoch is a fixed reference time used by all fake clocks in this file.
+// Chosen so that it falls on a clean 30s bucket boundary (Unix divisible by 30).
+var testEpoch = time.Unix(1_700_000_000, 0).UTC()
+
+// testWindow is the coalescing window used by all handler fixtures in this file.
+const testWindow = 30 * time.Second
+
+// newTestHandlerWithQueue builds the HandlerWithOptions chain using explicit
+// queue, clock, and idgen dependencies.
+func newTestHandlerWithQueue(t *testing.T, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers(testWhitelist)
+	handlers := api.NewHandlers(testWhitelist, q, clk, ig, testWindow)
 	return api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: api.JSONErrorHandler,
 	})
 }
 
-// TestHandlers_RefreshQuote_ReturnsStubAccepted asserts that POST /quotes/refresh
-// returns 202 with the required headers and a body that unmarshals into
-// api.RefreshAccepted. The contract allows a zero-UUID stub; we verify only that
-// the Id field is present and that the JSON round-trips cleanly.
+// newTestHandler builds the HandlerWithOptions chain used by the existing tests.
+// It does NOT include the middleware stack; for that see TestServerWiring.
+func newTestHandler(t *testing.T) http.Handler {
+	t.Helper()
+	clk := clock.NewFake(testEpoch)
+	q := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	return newTestHandlerWithQueue(t, q, clk, ig)
+}
+
+// fakeErrQueue is a 5-method stub of queue.JobQueue whose Enqueue always
+// returns an error. Defined inline per the contract — do not extract.
+type fakeErrQueue struct{}
+
+func (fakeErrQueue) Enqueue(_ context.Context, _ queue.Job) (queue.JobID, bool, error) {
+	return "", false, errors.New("boom")
+}
+func (fakeErrQueue) Reserve(_ context.Context, _ int, _ time.Duration) ([]queue.Job, error) {
+	return nil, nil
+}
+func (fakeErrQueue) Complete(_ context.Context, _ queue.JobID) error { return nil }
+func (fakeErrQueue) Reschedule(_ context.Context, _ queue.JobID, _ string, _ time.Duration) error {
+	return nil
+}
+func (fakeErrQueue) Fail(_ context.Context, _ queue.JobID, _ string) error { return nil }
+
+// TestHandlers_RefreshQuote_EnqueuesAndReturnsQueueID asserts the success path:
+// POST /quotes/refresh enqueues a job with Source="refresh" and returns 202
+// whose body Id matches the queue-returned id (not just any UUID).
+func TestHandlers_RefreshQuote_EnqueuesAndReturnsQueueID(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig)
+
+	body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
+	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusAccepted, rec.Code, "POST /quotes/refresh must return 202")
+	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var resp api.RefreshAccepted
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	// SeqIDGenerator first id is 00000000-0000-0000-0000-000000000001
+	wantIDStr := "00000000-0000-0000-0000-000000000001"
+	wantID, err := uuid.Parse(wantIDStr)
+	require.NoError(t, err)
+	assert.Equal(t, wantID, uuid.UUID(resp.Id), "body Id must be the queue-returned id")
+
+	assert.Equal(t, "/quotes/"+wantIDStr, rec.Header().Get("Location"),
+		"Location must reference the queue-returned id")
+
+	// Inspect the queued job.
+	jobs, err := mq.Reserve(context.Background(), 10, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1, "exactly one job must be in the queue")
+
+	j := jobs[0]
+	assert.Equal(t, "refresh", j.Source)
+	assert.Equal(t, "EUR", j.Base)
+	assert.Equal(t, "MXN", j.Quote)
+	wantDedup := queue.DedupKey("EUR", "MXN", testEpoch, testWindow)
+	assert.Equal(t, wantDedup, j.DedupKey)
+}
+
+// TestHandlers_RefreshQuote_CoalescingReturnsSameID asserts that a second POST
+// within the same coalescing window returns the same id and increments
+// obs.CoalescingCollapsedTotal by exactly 1.
+func TestHandlers_RefreshQuote_CoalescingReturnsSameID(t *testing.T) {
+	// NOT parallel: reads a global prometheus counter via delta measurement.
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig)
+
+	doPost := func() string {
+		t.Helper()
+		body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
+		req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusAccepted, rec.Code)
+		var resp api.RefreshAccepted
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return uuid.UUID(resp.Id).String()
+	}
+
+	beforeCollapsed := testutil.ToFloat64(obs.CoalescingCollapsedTotal)
+
+	id1 := doPost()
+	id2 := doPost()
+
+	assert.Equal(t, id1, id2, "coalesced request must return the same id")
+	afterCollapsed := testutil.ToFloat64(obs.CoalescingCollapsedTotal)
+	assert.Equal(t, float64(1), afterCollapsed-beforeCollapsed,
+		"CoalescingCollapsedTotal must increment by exactly 1")
+}
+
+// TestHandlers_RefreshQuote_DifferentBucketProducesNewID asserts that advancing
+// the fake clock by the full coalescing window moves into a new bucket and a
+// subsequent POST produces a different id.
+func TestHandlers_RefreshQuote_DifferentBucketProducesNewID(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig)
+
+	doPost := func() string {
+		t.Helper()
+		body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
+		req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusAccepted, rec.Code)
+		var resp api.RefreshAccepted
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return uuid.UUID(resp.Id).String()
+	}
+
+	id1 := doPost()
+	clk.Advance(testWindow)
+	id2 := doPost()
+
+	assert.NotEqual(t, id1, id2, "different bucket must produce a different id")
+
+	// Both jobs must be in the queue.
+	jobs, err := mq.Reserve(context.Background(), 10, time.Minute)
+	require.NoError(t, err)
+	assert.Len(t, jobs, 2, "two distinct jobs must exist in the queue")
+}
+
+// TestHandlers_RefreshQuote_EnqueueError returns 500 with Internal error code
+// when the queue returns an error.
+func TestHandlers_RefreshQuote_EnqueueError(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig)
+
+	body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
+	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var envelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Equal(t, api.Internal, envelope.Error.Code)
+}
+
+// TestHandlers_RefreshQuote_ContextPropagation asserts the handler completes
+// without panic when the request carries a live (non-cancelled) context.
+// Full client-disconnect coverage is deferred to iter 8/9.
+func TestHandlers_RefreshQuote_ContextPropagation(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
+	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusAccepted, rec.Code,
+		"handler must complete normally with a live context")
+}
+
+// TestHandlers_RefreshQuote_ReturnsStubAccepted is kept as a regression guard
+// for the 202 + headers contract. The Id assertion is tightened: the returned
+// UUID must be non-zero and must match the id of the queued job.
 func TestHandlers_RefreshQuote_ReturnsStubAccepted(t *testing.T) {
 	t.Parallel()
 
@@ -76,10 +281,12 @@ func TestHandlers_RefreshQuote_ReturnsStubAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp),
 		"body must unmarshal into api.RefreshAccepted")
 
-	// openapi_types.UUID is uuid.UUID ([16]byte). The zero value is the all-zero
-	// UUID "00000000-…". Both zero and non-zero are acceptable stub values per the
-	// contract; we assert only that the JSON field was present and decoded.
-	_ = uuid.UUID(resp.Id) // type-checks that resp.Id is a uuid.UUID
+	// Tightened: id must be non-zero (SeqIDGenerator first value is non-zero).
+	gotID := uuid.UUID(resp.Id)
+	assert.NotEqual(t, uuid.UUID{}, gotID, "returned Id must be non-zero")
+	// Location must reference exactly that id.
+	assert.Equal(t, "/quotes/"+gotID.String(), loc,
+		"Location must reference the returned id")
 }
 
 // TestHandlers_GetQuoteJob_ReturnsStubJobStatus asserts that GET /quotes/{id}
@@ -173,8 +380,11 @@ func TestHandlers_GetLatestQuote_ReturnsNoData(t *testing.T) {
 func TestServerWiring_HandlersServedThroughMiddlewareChain(t *testing.T) {
 	// NOT parallel: uses prometheus global counters via delta measurement.
 
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers(testWhitelist)
+	handlers := api.NewHandlers(testWhitelist, mq, clk, ig, testWindow)
 	api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: api.JSONErrorHandler,

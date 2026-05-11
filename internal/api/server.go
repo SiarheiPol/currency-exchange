@@ -12,22 +12,35 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	"currency-exchange/internal/clock"
+	"currency-exchange/internal/idgen"
+	"currency-exchange/internal/queue"
 )
 
 // pairFormatRE matches exactly three uppercase ASCII letters.
 var pairFormatRE = regexp.MustCompile(`^[A-Z]{3}$`)
 
-// Handlers implements ServerInterface. The whitelist field holds the set of
-// supported currency codes; later iterations introduce queue, repo and clock.
+// Handlers implements ServerInterface.
 type Handlers struct {
-	whitelist []string
+	whitelist        []string
+	q                queue.JobQueue
+	clk              clock.Clock
+	idgen            idgen.IDGenerator
+	coalescingWindow time.Duration
 }
 
-// NewHandlers returns a Handlers ready to serve. The whitelist is the set of
-// supported currency codes used by pair validation.
-func NewHandlers(whitelist []string) *Handlers {
-	return &Handlers{whitelist: whitelist}
+// NewHandlers returns a Handlers ready to serve.
+func NewHandlers(whitelist []string, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator, window time.Duration) *Handlers {
+	return &Handlers{
+		whitelist:        whitelist,
+		q:                q,
+		clk:              clk,
+		idgen:            ig,
+		coalescingWindow: window,
+	}
 }
 
 // validatePair runs the three-step validation check:
@@ -73,8 +86,9 @@ func JSONErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	writeError(w, http.StatusBadRequest, newError(InvalidRequest, err.Error()))
 }
 
-// RefreshQuote handles POST /quotes/refresh. Stub: always returns 202 with a
-// zero UUID for valid pairs. Iter 7 replaces this with a real queue enqueue.
+// RefreshQuote handles POST /quotes/refresh. Generates a UUID, enqueues a
+// refresh job, and returns 202 with the queue-returned id (coalesced duplicates
+// surface the original id).
 func (h *Handlers) RefreshQuote(w http.ResponseWriter, r *http.Request, params RefreshQuoteParams) {
 	if !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		writeError(w, http.StatusBadRequest, newError(InvalidRequest, "Content-Type must be application/json"))
@@ -89,12 +103,31 @@ func (h *Handlers) RefreshQuote(w http.ResponseWriter, r *http.Request, params R
 		writeError(w, status, e)
 		return
 	}
-	var stubID openapi_types.UUID // all-zero
+	now := h.clk.Now()
+	job := queue.Job{
+		ID:        queue.JobID(h.idgen.NewID()),
+		Base:      req.Base,
+		Quote:     req.Quote,
+		DedupKey:  queue.DedupKey(req.Base, req.Quote, now, h.coalescingWindow),
+		Source:    "refresh",
+		NextRunAt: now,
+	}
+	returnedID, _, err := h.q.Enqueue(r.Context(), job)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not enqueue refresh job"))
+		return
+	}
+	parsedUUID, err := uuid.Parse(string(returnedID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not enqueue refresh job"))
+		return
+	}
+	idStr := parsedUUID.String()
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Location", "/quotes/"+stubID.String())
+	w.Header().Set("Location", "/quotes/"+idStr)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(RefreshAccepted{Id: stubID})
+	_ = json.NewEncoder(w).Encode(RefreshAccepted{Id: openapi_types.UUID(parsedUUID)})
 }
 
 // GetQuoteJob handles GET /quotes/{id}. Stub: always returns 200 with a

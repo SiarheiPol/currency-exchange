@@ -172,7 +172,7 @@ func run() error {
 		},
 	))
 
-	handlers := api.NewHandlers(cfg.WhitelistCurrencies)
+	handlers := api.NewHandlers(cfg.WhitelistCurrencies, q, clk, idgen.New(), cfg.CoalescingWindow)
 	api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: api.JSONErrorHandler,
