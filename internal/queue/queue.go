@@ -78,6 +78,10 @@ type JobQueue interface {
 	// Fail marks the job permanently failed and records the reason.
 	// Returns ErrNotFound if no job has the given id.
 	Fail(ctx context.Context, id JobID, reason string) error
+
+	// GetByID returns the read-side view of the job identified by id.
+	// Returns ErrNotFound if no job exists with the given id.
+	GetByID(ctx context.Context, id JobID) (JobView, error)
 }
 
 // Cleaner recovers jobs whose lease has expired.
@@ -98,3 +102,19 @@ var ErrNotReserved = errors.New("job not in running state")
 // one of the accepted values ("refresh" or "scheduler"). Queue implementations
 // check this before touching storage so the DB CHECK constraint is defense-in-depth.
 var ErrInvalidSource = errors.New("invalid job source")
+
+// JobView is the read-side projection of a job for callers that need to inspect
+// status, completion details, and the persisted quote snapshot. Producers do
+// not construct JobView — it is returned by JobQueue.GetByID.
+type JobView struct {
+	ID             JobID
+	Base           string
+	Quote          string
+	Status         string // "pending", "running", "done", or "failed"
+	Attempts       int
+	CreatedAt      time.Time
+	CompletedAt    *time.Time       // nil unless status is done or failed
+	Price          *decimal.Decimal // nil unless status is done
+	QuoteUpdatedAt *time.Time       // nil unless status is done
+	LastError      string           // empty unless status is failed
+}

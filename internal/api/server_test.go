@@ -67,8 +67,8 @@ func newTestHandler(t *testing.T) http.Handler {
 	return newTestHandlerWithQueue(t, q, clk, ig)
 }
 
-// fakeErrQueue is a 5-method stub of queue.JobQueue whose Enqueue always
-// returns an error. Defined inline per the contract — do not extract.
+// fakeErrQueue is a stub of queue.JobQueue whose Enqueue and GetByID always
+// return errors. Defined inline per the contract — do not extract.
 type fakeErrQueue struct{}
 
 func (fakeErrQueue) Enqueue(_ context.Context, _ queue.Job) (queue.JobID, bool, error) {
@@ -84,6 +84,9 @@ func (fakeErrQueue) Reschedule(_ context.Context, _ queue.JobID, _ string, _ tim
 	return nil
 }
 func (fakeErrQueue) Fail(_ context.Context, _ queue.JobID, _ string) error { return nil }
+func (fakeErrQueue) GetByID(_ context.Context, _ queue.JobID) (queue.JobView, error) {
+	return queue.JobView{}, errors.New("boom")
+}
 
 // TestHandlers_RefreshQuote_EnqueuesAndReturnsQueueID asserts the success path:
 // POST /quotes/refresh enqueues a job with Source="refresh" and returns 202
@@ -290,53 +293,6 @@ func TestHandlers_RefreshQuote_ReturnsStubAccepted(t *testing.T) {
 	// Location must reference exactly that id.
 	assert.Equal(t, "/quotes/"+gotID.String(), loc,
 		"Location must reference the returned id")
-}
-
-// TestHandlers_GetQuoteJob_ReturnsStubJobStatus asserts that GET /quotes/{id}
-// returns 200 with the required headers and a body that unmarshals into
-// api.JobStatus with discriminator "pending". The Id field must echo the path id.
-func TestHandlers_GetQuoteJob_ReturnsStubJobStatus(t *testing.T) {
-	t.Parallel()
-
-	h := newTestHandler(t)
-
-	pathUUIDStr := "00000000-0000-0000-0000-000000000001"
-	req := httptest.NewRequest(http.MethodGet, "/quotes/"+pathUUIDStr, nil)
-	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code, "GET /quotes/{id} must return 200")
-
-	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"),
-		"Cache-Control must be no-store for a pending stub")
-
-	assert.Equal(t, "1", rec.Header().Get("Retry-After"),
-		"Retry-After must be 1 for a pending job stub")
-
-	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json",
-		"Content-Type must contain application/json")
-
-	var js api.JobStatus
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &js),
-		"body must unmarshal into api.JobStatus")
-
-	disc, err := js.Discriminator()
-	require.NoError(t, err, "JobStatus.Discriminator must not error")
-	assert.Equal(t, "pending", disc, "discriminator must be \"pending\"")
-
-	pending, err := js.AsJobStatusPending()
-	require.NoError(t, err, "AsJobStatusPending must not error")
-
-	assert.Equal(t, api.JobStatusPendingStatus("pending"), pending.Status,
-		"JobStatusPending.Status must be \"pending\"")
-	assert.Equal(t, "EUR", pending.Base, "JobStatusPending.Base must be EUR")
-	assert.Equal(t, "MXN", pending.Quote, "JobStatusPending.Quote must be MXN")
-
-	wantID, err := uuid.Parse(pathUUIDStr)
-	require.NoError(t, err, "test UUID must parse cleanly")
-	assert.Equal(t, wantID, pending.Id,
-		"JobStatusPending.Id must echo the path UUID")
 }
 
 // TestHandlers_GetLatestQuote_ReturnsNoData asserts that GET /quotes/latest
@@ -578,6 +534,313 @@ func TestRefreshQuote_Validation(t *testing.T) {
 				"error code for %s", c.name)
 		})
 	}
+}
+
+// testFixedClock is a deterministic clock used by the real-handler GET tests.
+var testFixedClock = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+// newGetJobFixture returns an http.Handler wired to a fresh memqueue and the
+// queue itself so each subtest can seed jobs before issuing requests.
+func newGetJobFixture(t *testing.T) (http.Handler, *memqueue.Queue) {
+	t.Helper()
+	clk := clock.NewFake(testFixedClock)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	return newTestHandlerWithQueue(t, mq, clk, ig), mq
+}
+
+// enqueueJob is a helper that enqueues a job with the given base/quote and
+// returns the assigned JobID. DedupKey is set to an empty string so multiple
+// calls don't coalesce.
+func enqueueJob(t *testing.T, mq *memqueue.Queue, base, quote string) queue.JobID {
+	t.Helper()
+	clk := clock.NewFake(testFixedClock)
+	job := queue.Job{
+		ID:        queue.JobID(idgen.NewSeq().NewID()),
+		Base:      base,
+		Quote:     quote,
+		DedupKey:  "",
+		NextRunAt: clk.Now(),
+		Source:    "refresh",
+	}
+	id, _, err := mq.Enqueue(context.Background(), job)
+	require.NoError(t, err)
+	return id
+}
+
+// TestGetQuoteJob_RealHandler_Pending asserts that a pending job returns 200
+// with status=pending, Cache-Control: no-store, Retry-After: 1, and no ETag.
+func TestGetQuoteJob_RealHandler_Pending(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "MXN")
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
+	assert.Empty(t, rec.Header().Get("ETag"), "ETag must not be set for pending")
+
+	var js api.JobStatus
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &js))
+	disc, err := js.Discriminator()
+	require.NoError(t, err)
+	assert.Equal(t, "pending", disc)
+
+	pending, err := js.AsJobStatusPending()
+	require.NoError(t, err)
+	assert.Equal(t, api.JobStatusPendingStatus("pending"), pending.Status)
+	assert.Equal(t, "EUR", pending.Base)
+	assert.Equal(t, "MXN", pending.Quote)
+
+	wantUUID, parseErr := uuid.Parse(string(id))
+	require.NoError(t, parseErr)
+	assert.Equal(t, wantUUID, uuid.UUID(pending.Id), "Id must echo the path UUID")
+}
+
+// TestGetQuoteJob_RealHandler_PendingNoETag is a dedicated regression guard
+// confirming the ETag header is absent for a pending job.
+func TestGetQuoteJob_RealHandler_PendingNoETag(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "USD", "MXN")
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get("ETag"), "ETag header must be absent for pending")
+}
+
+// TestGetQuoteJob_RealHandler_Done asserts that a completed job returns 200
+// with status=done, correct price, Cache-Control: private, max-age=3600, immutable,
+// and ETag: "<id>-done".
+func TestGetQuoteJob_RealHandler_Done(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "MXN")
+
+	jobs, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	wantPrice := decimal.RequireFromString("1.234567")
+	wantQuoteTime := time.Date(2026, 6, 1, 11, 59, 0, 0, time.UTC)
+	err = mq.Complete(context.Background(), id, wantPrice, wantQuoteTime)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "private, max-age=3600, immutable", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, `"`+string(id)+`-done"`, rec.Header().Get("ETag"))
+
+	var js api.JobStatus
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &js))
+	disc, err := js.Discriminator()
+	require.NoError(t, err)
+	assert.Equal(t, "done", disc)
+
+	done, err := js.AsJobStatusDone()
+	require.NoError(t, err)
+	assert.Equal(t, api.JobStatusDoneStatus("done"), done.Status)
+	assert.InDelta(t, 1.234567, done.Price, 1e-6, "price must match within delta")
+}
+
+// TestGetQuoteJob_RealHandler_Failed asserts that a failed job returns 200 with
+// status=failed, error.code=upstream_unavailable, error.message matching the
+// reason, Cache-Control: private, max-age=3600, immutable, and ETag: "<id>-failed".
+func TestGetQuoteJob_RealHandler_Failed(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "USD")
+
+	jobs, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	err = mq.Fail(context.Background(), id, "upstream timeout")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "private, max-age=3600, immutable", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, `"`+string(id)+`-failed"`, rec.Header().Get("ETag"))
+
+	var js api.JobStatus
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &js))
+	disc, err := js.Discriminator()
+	require.NoError(t, err)
+	assert.Equal(t, "failed", disc)
+
+	failed, err := js.AsJobStatusFailed()
+	require.NoError(t, err)
+	assert.Equal(t, api.JobStatusFailedStatus("failed"), failed.Status)
+	assert.Equal(t, "upstream_unavailable", failed.Error.Code)
+	assert.Equal(t, "upstream timeout", failed.Error.Message)
+}
+
+// TestGetQuoteJob_RealHandler_304Done asserts that a GET with If-None-Match
+// matching a done job's ETag returns 304 with an empty body but with the same
+// Cache-Control and ETag headers.
+func TestGetQuoteJob_RealHandler_304Done(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "MXN")
+
+	jobs, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	err = mq.Complete(context.Background(), id, decimal.RequireFromString("1.5"), time.Now())
+	require.NoError(t, err)
+
+	etag := `"` + string(id) + `-done"`
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotModified, rec.Code)
+	assert.Equal(t, "private, max-age=3600, immutable", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, etag, rec.Header().Get("ETag"))
+	assert.Empty(t, rec.Body.String(), "304 body must be empty")
+}
+
+// TestGetQuoteJob_RealHandler_304Failed asserts that a GET with If-None-Match
+// matching a failed job's ETag returns 304 with empty body and headers intact.
+func TestGetQuoteJob_RealHandler_304Failed(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "USD", "MXN")
+
+	jobs, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	err = mq.Fail(context.Background(), id, "timeout")
+	require.NoError(t, err)
+
+	etag := `"` + string(id) + `-failed"`
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotModified, rec.Code)
+	assert.Equal(t, "private, max-age=3600, immutable", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, etag, rec.Header().Get("ETag"))
+	assert.Empty(t, rec.Body.String(), "304 body must be empty")
+}
+
+// TestGetQuoteJob_RealHandler_ETagMismatch asserts that a GET with a wrong
+// If-None-Match on a done job returns 200 with body (not 304).
+func TestGetQuoteJob_RealHandler_ETagMismatch(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "MXN")
+
+	jobs, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	err = mq.Complete(context.Background(), id, decimal.RequireFromString("2.0"), time.Now())
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	req.Header.Set("If-None-Match", `"wrong-etag"`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "mismatched ETag must return 200, not 304")
+	assert.NotEmpty(t, rec.Body.String(), "200 body must not be empty")
+}
+
+// TestGetQuoteJob_RealHandler_NotFound asserts that a GET for a valid UUID that
+// was never enqueued returns 404 with error code not_found and Cache-Control: no-store.
+func TestGetQuoteJob_RealHandler_NotFound(t *testing.T) {
+	t.Parallel()
+
+	h, _ := newGetJobFixture(t)
+
+	unknownID := "00000000-0000-0000-0000-000000000099"
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+unknownID, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var envelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Equal(t, api.NotFound, envelope.Error.Code)
+}
+
+// TestGetQuoteJob_RealHandler_GetByIDError asserts that when GetByID returns a
+// generic (non-ErrNotFound) error the handler returns 500 with code=internal.
+func TestGetQuoteJob_RealHandler_GetByIDError(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testFixedClock)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig)
+
+	anyID := "00000000-0000-0000-0000-000000000001"
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+anyID, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var envelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Equal(t, api.Internal, envelope.Error.Code)
+}
+
+// TestGetQuoteJob_RealHandler_RunningShowsAPIStatusPending asserts that a job
+// that is reserved (status=running in the queue) is reported as status=pending
+// by the API (clients see at most two transitions: pending→done or pending→failed).
+func TestGetQuoteJob_RealHandler_RunningShowsAPIStatusPending(t *testing.T) {
+	t.Parallel()
+
+	h, mq := newGetJobFixture(t)
+	id := enqueueJob(t, mq, "EUR", "MXN")
+
+	// Reserve moves the job to running internally, but the API must still say pending.
+	_, err := mq.Reserve(context.Background(), 1, time.Minute)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/"+string(id), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var js api.JobStatus
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &js))
+	disc, err := js.Discriminator()
+	require.NoError(t, err)
+	assert.Equal(t, "pending", disc, "running job must surface as API status=pending")
+
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Empty(t, rec.Header().Get("ETag"), "running job must not have an ETag")
 }
 
 // TestGetLatestQuote_Validation exercises the three-step pair validation

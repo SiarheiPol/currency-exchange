@@ -37,8 +37,10 @@ type record struct {
 	status         status
 	leaseUntil     time.Time
 	createdAt      time.Time
+	completedAt    time.Time // zero unless Complete or Fail was called
 	price          decimal.Decimal
 	quoteUpdatedAt time.Time
+	lastError      string // empty unless Fail was called
 }
 
 var _ queue.JobQueue = (*Queue)(nil)
@@ -137,6 +139,7 @@ func (q *Queue) Complete(_ context.Context, id queue.JobID, price decimal.Decima
 		return queue.ErrNotReserved
 	}
 	r.status = statusDone
+	r.completedAt = q.clock.Now()
 	r.price = price
 	r.quoteUpdatedAt = quoteUpdatedAt
 	return nil
@@ -192,6 +195,42 @@ func (q *Queue) Reschedule(_ context.Context, id queue.JobID, _ string, after ti
 	return nil
 }
 
+// GetByID returns the read-side view of the job identified by id.
+// Returns ErrNotFound if no job exists with the given id.
+func (q *Queue) GetByID(_ context.Context, id queue.JobID) (queue.JobView, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	r, ok := q.jobs[id]
+	if !ok {
+		return queue.JobView{}, queue.ErrNotFound
+	}
+	return buildView(id, r), nil
+}
+
+// buildView constructs a JobView from an internal record.
+func buildView(id queue.JobID, r *record) queue.JobView {
+	v := queue.JobView{
+		ID:        id,
+		Base:      r.job.Base,
+		Quote:     r.job.Quote,
+		Status:    statusName(r.status),
+		Attempts:  r.job.Attempts,
+		CreatedAt: r.createdAt,
+		LastError: r.lastError,
+	}
+	if !r.completedAt.IsZero() {
+		t := r.completedAt
+		v.CompletedAt = &t
+	}
+	if r.status == statusDone {
+		p := r.price
+		v.Price = &p
+		qt := r.quoteUpdatedAt
+		v.QuoteUpdatedAt = &qt
+	}
+	return v
+}
+
 // RecoverExpired resets statusRunning records with an expired lease back to
 // statusPending. Returns the count of recovered records.
 func (q *Queue) RecoverExpired(_ context.Context) (int, error) {
@@ -212,7 +251,7 @@ func (q *Queue) RecoverExpired(_ context.Context) (int, error) {
 
 // Fail marks the job permanently failed. Returns ErrNotFound or ErrNotReserved
 // as appropriate.
-func (q *Queue) Fail(_ context.Context, id queue.JobID, _ string) error {
+func (q *Queue) Fail(_ context.Context, id queue.JobID, reason string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -224,5 +263,7 @@ func (q *Queue) Fail(_ context.Context, id queue.JobID, _ string) error {
 		return queue.ErrNotReserved
 	}
 	r.status = statusFailed
+	r.completedAt = q.clock.Now()
+	r.lastError = reason
 	return nil
 }

@@ -6,6 +6,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -130,25 +132,118 @@ func (h *Handlers) RefreshQuote(w http.ResponseWriter, r *http.Request, params R
 	_ = json.NewEncoder(w).Encode(RefreshAccepted{Id: openapi_types.UUID(parsedUUID)})
 }
 
-// GetQuoteJob handles GET /quotes/{id}. Stub: always returns 200 with a
-// pending JobStatus echoing the path id. Iter 8 replaces this with a real
-// DB lookup.
-func (h *Handlers) GetQuoteJob(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params GetQuoteJobParams) {
-	pending := JobStatusPending{
-		Id:        id,
-		Base:      "EUR",
-		Quote:     "MXN",
+// GetQuoteJob handles GET /quotes/{id}. Returns the current status of the job,
+// with appropriate Cache-Control, ETag, and conditional 304 support.
+func (h *Handlers) GetQuoteJob(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, _ GetQuoteJobParams) {
+	view, err := h.q.GetByID(r.Context(), queue.JobID(uuid.UUID(id).String()))
+	if errors.Is(err, queue.ErrNotFound) {
+		writeError(w, http.StatusNotFound, newError(NotFound, "job not found"))
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not load job"))
+		return
+	}
+	// API status mapping: internal "running" surfaces as "pending" to clients.
+	apiStatus := view.Status
+	if apiStatus == "running" {
+		apiStatus = "pending"
+	}
+	switch apiStatus {
+	case "pending":
+		renderPending(w, view)
+	case "done":
+		renderDone(w, r, view)
+	case "failed":
+		renderFailed(w, r, view)
+	default:
+		writeError(w, http.StatusInternalServerError, newError(Internal, "unknown job status"))
+	}
+}
+
+// renderPending writes a 200 pending response with no-store cache headers.
+func renderPending(w http.ResponseWriter, view queue.JobView) {
+	parsedUUID, _ := uuid.Parse(string(view.ID))
+	body := JobStatusPending{
+		Id:        openapi_types.UUID(parsedUUID),
+		Base:      view.Base,
+		Quote:     view.Quote,
 		Status:    Pending,
-		CreatedAt: time.Now(),
+		CreatedAt: view.CreatedAt,
 	}
 	var js JobStatus
-	if err := js.FromJobStatusPending(pending); err != nil {
-		http.Error(w, "internal", http.StatusInternalServerError)
+	if err := js.FromJobStatusPending(body); err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not build response"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(js)
+}
+
+// renderDone writes a 200 done response (or 304 if ETag matches).
+func renderDone(w http.ResponseWriter, r *http.Request, view queue.JobView) {
+	etag := fmt.Sprintf(`"%s-done"`, string(view.ID))
+	w.Header().Set("Cache-Control", "private, max-age=3600, immutable")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	parsedUUID, _ := uuid.Parse(string(view.ID))
+	body := JobStatusDone{
+		Id:          openapi_types.UUID(parsedUUID),
+		Base:        view.Base,
+		Quote:       view.Quote,
+		Status:      Done,
+		CreatedAt:   view.CreatedAt,
+		CompletedAt: *view.CompletedAt,
+		Price:       func() float64 { f, _ := view.Price.Float64(); return f }(),
+		UpdatedAt:   *view.QuoteUpdatedAt,
+	}
+	var js JobStatus
+	if err := js.FromJobStatusDone(body); err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not build response"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(js)
+}
+
+// renderFailed writes a 200 failed response (or 304 if ETag matches).
+func renderFailed(w http.ResponseWriter, r *http.Request, view queue.JobView) {
+	etag := fmt.Sprintf(`"%s-failed"`, string(view.ID))
+	w.Header().Set("Cache-Control", "private, max-age=3600, immutable")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	parsedUUID, _ := uuid.Parse(string(view.ID))
+	body := JobStatusFailed{
+		Id:          openapi_types.UUID(parsedUUID),
+		Base:        view.Base,
+		Quote:       view.Quote,
+		Status:      Failed,
+		CreatedAt:   view.CreatedAt,
+		CompletedAt: *view.CompletedAt,
+		Error: struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}{
+			Code:    "upstream_unavailable",
+			Message: view.LastError,
+		},
+	}
+	var js JobStatus
+	if err := js.FromJobStatusFailed(body); err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not build response"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(js)
 }

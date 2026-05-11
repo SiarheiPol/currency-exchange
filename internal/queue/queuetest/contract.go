@@ -747,6 +747,117 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			"expected ErrInvalidSource for Source=%q, got %v", "unknown", err)
 	})
 
+	// --- GetByID ---
+
+	// GetByID/NotFound: calling GetByID with a valid UUID that was never inserted
+	// must return queue.ErrNotFound.
+	t.Run("GetByID/NotFound", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q, _ := factory(t, clk)
+		ctx := context.Background()
+
+		_, err := q.GetByID(ctx, ghostID)
+		assert.True(t, errors.Is(err, queue.ErrNotFound),
+			"GetByID for unknown id must return ErrNotFound, got %v", err)
+	})
+
+	// GetByID/Pending: after Enqueue only the view must show status="pending"
+	// with the correct Base, Quote, CreatedAt, and all nullable fields nil/zero.
+	t.Run("GetByID/Pending", func(t *testing.T) {
+		t.Parallel()
+		t0 := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+		clk := clock.NewFake(t0)
+		q, _ := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := newJob(clk, idg, "EUR", "MXN", "getbyid-pending")
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		view, err := q.GetByID(ctx, job.ID)
+		require.NoError(t, err)
+
+		assert.Equal(t, job.ID, view.ID)
+		assert.Equal(t, "EUR", view.Base)
+		assert.Equal(t, "MXN", view.Quote)
+		assert.Equal(t, "pending", view.Status)
+		assert.True(t, t0.Equal(view.CreatedAt),
+			"CreatedAt must equal enqueue time %v, got %v", t0, view.CreatedAt)
+		assert.Nil(t, view.CompletedAt, "CompletedAt must be nil for pending job")
+		assert.Nil(t, view.Price, "Price must be nil for pending job")
+		assert.Nil(t, view.QuoteUpdatedAt, "QuoteUpdatedAt must be nil for pending job")
+		assert.Empty(t, view.LastError, "LastError must be empty for pending job")
+	})
+
+	// GetByID/Done: after Enqueue + Reserve + Complete the view must show
+	// status="done" with Price, QuoteUpdatedAt, and CompletedAt all non-nil and
+	// matching the values passed to Complete.
+	t.Run("GetByID/Done", func(t *testing.T) {
+		t.Parallel()
+		t0 := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+		clk := clock.NewFake(t0)
+		q, _ := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		wantPrice := decimal.RequireFromString("1.234567")
+		wantQuoteTime := time.Date(2026, 6, 1, 11, 59, 0, 0, time.UTC)
+
+		job := newJob(clk, idg, "EUR", "USD", "getbyid-done")
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		_, err = q.Reserve(ctx, 1, 60*time.Second)
+		require.NoError(t, err)
+
+		err = q.Complete(ctx, job.ID, wantPrice, wantQuoteTime)
+		require.NoError(t, err)
+
+		view, err := q.GetByID(ctx, job.ID)
+		require.NoError(t, err)
+
+		assert.Equal(t, "done", view.Status)
+		require.NotNil(t, view.Price, "Price must be non-nil for done job")
+		assert.True(t, wantPrice.Equal(*view.Price),
+			"Price %s must equal argument %s", view.Price, wantPrice)
+		require.NotNil(t, view.QuoteUpdatedAt, "QuoteUpdatedAt must be non-nil for done job")
+		assert.True(t, wantQuoteTime.Equal(*view.QuoteUpdatedAt),
+			"QuoteUpdatedAt %v must equal argument %v", *view.QuoteUpdatedAt, wantQuoteTime)
+		require.NotNil(t, view.CompletedAt, "CompletedAt must be non-nil for done job")
+	})
+
+	// GetByID/Failed: after Enqueue + Reserve + Fail the view must show
+	// status="failed", LastError matching the reason, CompletedAt non-nil,
+	// and Price/QuoteUpdatedAt nil.
+	t.Run("GetByID/Failed", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q, _ := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := newJob(clk, idg, "USD", "MXN", "getbyid-failed")
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		_, err = q.Reserve(ctx, 1, 60*time.Second)
+		require.NoError(t, err)
+
+		err = q.Fail(ctx, job.ID, "boom")
+		require.NoError(t, err)
+
+		view, err := q.GetByID(ctx, job.ID)
+		require.NoError(t, err)
+
+		assert.Equal(t, "failed", view.Status)
+		assert.Equal(t, "boom", view.LastError)
+		require.NotNil(t, view.CompletedAt, "CompletedAt must be non-nil for failed job")
+		assert.Nil(t, view.Price, "Price must be nil for failed job")
+		assert.Nil(t, view.QuoteUpdatedAt, "QuoteUpdatedAt must be nil for failed job")
+	})
+
 	// --- Concurrency ---
 
 	t.Run("Concurrency/SameDedupKey_OnlyOneInserts", func(t *testing.T) {

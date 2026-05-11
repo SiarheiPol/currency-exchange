@@ -199,6 +199,58 @@ func (q *Queue) Fail(ctx context.Context, id queue.JobID, reason string) error {
 	return q.probeNotFoundOrNotReserved(ctx, id, "pgqueue fail")
 }
 
+// GetByID returns the read-side view of the job identified by id.
+// Returns ErrNotFound if no job exists with the given id.
+func (q *Queue) GetByID(ctx context.Context, id queue.JobID) (queue.JobView, error) {
+	var (
+		base           string
+		quote          string
+		statusStr      string
+		attempts       int
+		createdAt      time.Time
+		completedAt    *time.Time
+		priceStr       *string
+		quoteUpdatedAt *time.Time
+		lastError      *string
+	)
+	err := q.pool.QueryRow(ctx, `
+		SELECT base, quote, status, attempts, created_at, completed_at,
+		       price::text, quote_updated_at, last_error
+		  FROM quote_jobs
+		 WHERE id = $1`,
+		string(id),
+	).Scan(&base, &quote, &statusStr, &attempts, &createdAt,
+		&completedAt, &priceStr, &quoteUpdatedAt, &lastError)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return queue.JobView{}, queue.ErrNotFound
+		}
+		return queue.JobView{}, fmt.Errorf("pgqueue get by id: %w", err)
+	}
+
+	v := queue.JobView{
+		ID:             id,
+		Base:           base,
+		Quote:          quote,
+		Status:         statusStr,
+		Attempts:       attempts,
+		CreatedAt:      createdAt,
+		CompletedAt:    completedAt,
+		QuoteUpdatedAt: quoteUpdatedAt,
+	}
+	if lastError != nil {
+		v.LastError = *lastError
+	}
+	if priceStr != nil {
+		p, parseErr := decimal.NewFromString(*priceStr)
+		if parseErr != nil {
+			return queue.JobView{}, fmt.Errorf("pgqueue get by id: parse price: %w", parseErr)
+		}
+		v.Price = &p
+	}
+	return v, nil
+}
+
 // RecoverExpired resets running jobs whose lease has expired back to pending.
 // It returns the number of rows updated.
 func (q *Queue) RecoverExpired(ctx context.Context) (int, error) {
