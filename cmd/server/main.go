@@ -47,12 +47,6 @@ import (
 	"currency-exchange/internal/worker"
 )
 
-// workerHeartbeatThreshold bounds how stale the worker's last-iteration
-// timestamp can be before /readyz reports it as degraded. Six times the
-// default poll interval (5s) gives room for missed ticks under load without
-// false positives.
-const workerHeartbeatThreshold = 30 * time.Second
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
@@ -81,9 +75,11 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	workerHeartbeatThreshold := 6 * cfg.PollInterval
+
 	obs.Logger(rootCtx).Info(obs.EvWorkerConfigDerived,
-		"poll_interval", cfg.PollInterval,
-		"batch_size", cfg.BatchSize,
+		slog.Int64("poll_interval_ms", cfg.PollInterval.Milliseconds()),
+		slog.Int("batch_size", cfg.BatchSize),
 	)
 
 	pool, err := pgxpool.New(rootCtx, cfg.DBDSN)
@@ -114,7 +110,10 @@ func run() error {
 	obs.Logger(rootCtx).Info(obs.EvStartupProbeOK)
 
 	repo := pgquoterepo.New(pool)
-	w := worker.New(q, q, provider, repo, clk)
+	w := worker.New(q, q, provider, repo, clk,
+		worker.WithPollInterval(cfg.PollInterval),
+		worker.WithBatchSize(cfg.BatchSize),
+	)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})

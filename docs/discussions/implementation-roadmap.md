@@ -127,8 +127,8 @@ Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_MS` 
 
 - [x] `cmd/server/config.go` — read `REFRESH_MAX_LATENCY_MS` (integer milliseconds; default `2000`); refuse to start when `REFRESH_MAX_LATENCY_MS < 1000` (the sum `upstream_p99 + db_p99 + margin`) per `capacity.md > Refresh latency SLA > Startup validation`
 - [x] `cmd/server/config.go` — derive `pollInterval` and `batchSize` from the SLA + whitelist + `WORKER_COUNT`; log the effective values at startup (`derived worker.poll_interval=…, batch_size=…`)
-- [ ] `internal/worker/worker.go` — in the `Reserve` loop, **group reserved jobs by `Base`** before calling `FetchPairs`, then dispatch per-pair results from the batched response. Replaces the current per-job slice-of-one call. Matches the design in `background-mechanism.md > Lifecycle` step 3.
-- [ ] `cmd/server/main.go` — pass derived options to `worker.New(...)` via `WithPollInterval` / `WithBatchSize`; remove hardcoded defaults from `New` once env is the single source of truth
+- [x] `internal/worker/worker.go` — in the `Reserve` loop, **group reserved jobs by `Base`** before calling `FetchPairs`, then dispatch per-pair results from the batched response. Replaces the current per-job slice-of-one call. Matches the design in `background-mechanism.md > Lifecycle` step 3.
+- [x] `cmd/server/main.go` — pass derived options to `worker.New(...)` via `WithPollInterval` / `WithBatchSize`; remove hardcoded defaults from `New` once env is the single source of truth
 - [ ] **Job completion SLI plumbing** — covers schema, producer, worker, and metric in one consistent change:
   - `migrations/` — add column `source TEXT NOT NULL` to `quote_jobs` (allowed values: `refresh`, `scheduler`); enforce via `CHECK`
   - `internal/queue/` — `Job.Source` field on the type and on `Enqueue`; producer sets it (`refresh` in the `POST` handler, `scheduler` in `Tick`)

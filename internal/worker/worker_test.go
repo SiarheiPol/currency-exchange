@@ -2,6 +2,7 @@ package worker_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ func TestWorker_StopsOnContextCancel(t *testing.T) {
 	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
 		worker.WithPollInterval(1*time.Millisecond),
 		worker.WithCleanInterval(1*time.Millisecond),
+		worker.WithBatchSize(1),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -131,6 +133,7 @@ func TestWorker_CallsRecoverExpired(t *testing.T) {
 	w := worker.New(q, spy, happyFake(clk), memquoterepo.New(), clk,
 		worker.WithCleanInterval(1*time.Millisecond),
 		worker.WithPollInterval(1*time.Second), // large — keep poll out of the way
+		worker.WithBatchSize(1),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -200,6 +203,7 @@ func TestWorker_PollOutcomeIdleWhenQueueEmpty(t *testing.T) {
 	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
 		worker.WithPollInterval(1*time.Millisecond),
 		worker.WithCleanInterval(1*time.Second), // keep clean out of the way
+		worker.WithBatchSize(1),
 	)
 
 	idleBefore := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("idle"))
@@ -225,6 +229,7 @@ func TestWorker_LastIterationUpdates(t *testing.T) {
 	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
 		worker.WithPollInterval(1*time.Millisecond),
 		worker.WithCleanInterval(1*time.Millisecond),
+		worker.WithBatchSize(1),
 	)
 
 	require.True(t, w.LastIteration().IsZero(),
@@ -503,6 +508,295 @@ func TestWorker_QuotaExceeded_ReschedulesPlusOneHour(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, jobs, 1,
 		"job must be re-reservable after 1h quota reschedule window")
+}
+
+// ---------------------------------------------------------------------------
+// Stage 4.5 dispatch tests (group-by-base)
+// ---------------------------------------------------------------------------
+
+// TestWorker_SingleBaseBatch_OneFetchPairsCall asserts that when the worker
+// reserves a batch of jobs with the same base currency it calls FetchPairs
+// exactly once with all pairs, rather than once per job (T-1).
+func TestWorker_SingleBaseBatch_OneFetchPairsCall(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	pairEURUSD := ratesprovider.Pair{Base: "EUR", Quote: "USD"}
+	pairEURGBP := ratesprovider.Pair{Base: "EUR", Quote: "GBP"}
+
+	provider := &fake.Fake{
+		Clock: clk,
+		Quotes: map[ratesprovider.Pair]ratesprovider.Quote{
+			pairEURMXN: {Pair: pairEURMXN, Price: decimal.NewFromFloat(20.25)},
+			pairEURUSD: {Pair: pairEURUSD, Price: decimal.NewFromFloat(1.10)},
+			pairEURGBP: {Pair: pairEURGBP, Price: decimal.NewFromFloat(0.85)},
+		},
+	}
+
+	gen := idgen.NewSeq()
+	for _, q2 := range []string{"MXN", "USD", "GBP"} {
+		enqueueJob(t, q, queue.Job{
+			ID:        queue.JobID(gen.NewID()),
+			Base:      "EUR",
+			Quote:     q2,
+			NextRunAt: clk.Now(),
+		})
+	}
+
+	w := worker.New(q, q, provider, repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(3),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	require.Equal(t, 1, provider.Calls,
+		"FetchPairs must be called exactly once for the whole batch, not once per job")
+
+	// All 3 jobs must be completed.
+	remaining, err := q.Reserve(context.Background(), 10, time.Second)
+	require.NoError(t, err)
+	require.Empty(t, remaining, "all 3 jobs must be completed after single-batch dispatch")
+}
+
+// TestWorker_MultiBaseBatch_OneFetchPairsCall asserts that when the worker
+// reserves jobs from distinct base currencies it still calls FetchPairs exactly
+// once with all pairs in the batch (T-2).
+func TestWorker_MultiBaseBatch_OneFetchPairsCall(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	pairUSDEUR := ratesprovider.Pair{Base: "USD", Quote: "EUR"}
+
+	provider := &fake.Fake{
+		Clock: clk,
+		Quotes: map[ratesprovider.Pair]ratesprovider.Quote{
+			pairEURMXN: {Pair: pairEURMXN, Price: decimal.NewFromFloat(20.25)},
+			pairUSDEUR: {Pair: pairUSDEUR, Price: decimal.NewFromFloat(0.91)},
+		},
+	}
+
+	gen := idgen.NewSeq()
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		NextRunAt: clk.Now(),
+	})
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "USD",
+		Quote:     "EUR",
+		NextRunAt: clk.Now(),
+	})
+
+	w := worker.New(q, q, provider, repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(2),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	require.Equal(t, 1, provider.Calls,
+		"FetchPairs must be called exactly once even across distinct base currencies")
+
+	// Both jobs completed, both quotes present.
+	remaining, err := q.Reserve(context.Background(), 10, time.Second)
+	require.NoError(t, err)
+	require.Empty(t, remaining, "both jobs must be completed")
+
+	_, ok1 := repo.Get(pairEURMXN)
+	require.True(t, ok1, "EUR/MXN quote must be present in repo")
+
+	_, ok2 := repo.Get(pairUSDEUR)
+	require.True(t, ok2, "USD/EUR quote must be present in repo")
+}
+
+// TestWorker_BatchDemux_MissingPairFails asserts that when a batch contains a
+// pair absent from the provider response, that job is permanently failed while
+// the present pairs are completed (T-3).
+func TestWorker_BatchDemux_MissingPairFails(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	pairEURUSD := ratesprovider.Pair{Base: "EUR", Quote: "USD"}
+	pairEURGBP := ratesprovider.Pair{Base: "EUR", Quote: "GBP"} // absent → Missing
+
+	provider := &fake.Fake{
+		Clock: clk,
+		Quotes: map[ratesprovider.Pair]ratesprovider.Quote{
+			pairEURMXN: {Pair: pairEURMXN, Price: decimal.NewFromFloat(20.25)},
+			pairEURUSD: {Pair: pairEURUSD, Price: decimal.NewFromFloat(1.10)},
+			// pairEURGBP intentionally absent
+		},
+	}
+
+	gen := idgen.NewSeq()
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		NextRunAt: clk.Now(),
+	})
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "USD",
+		NextRunAt: clk.Now(),
+	})
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "GBP",
+		NextRunAt: clk.Now(),
+	})
+
+	w := worker.New(q, q, provider, repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(3),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	require.Equal(t, 1, provider.Calls,
+		"FetchPairs must be called exactly once for the demux batch")
+
+	// EUR/MXN and EUR/USD must be completed and in the repo.
+	_, ok1 := repo.Get(pairEURMXN)
+	require.True(t, ok1, "EUR/MXN quote must be present in repo after successful dispatch")
+
+	_, ok2 := repo.Get(pairEURUSD)
+	require.True(t, ok2, "EUR/USD quote must be present in repo after successful dispatch")
+
+	// EUR/GBP job must be permanently failed — not re-reservable after generous clock advance.
+	clk.Advance(10 * time.Minute)
+	remaining, err := q.Reserve(context.Background(), 10, time.Second)
+	require.NoError(t, err)
+	require.Empty(t, remaining,
+		"EUR/GBP job must be permanently failed (not re-reservable) after missing-pair demux")
+
+	_, ok3 := repo.Get(pairEURGBP)
+	require.False(t, ok3, "EUR/GBP must not be in repo after missing-pair failure")
+}
+
+// TestWorker_BatchLevelTransientError_AllJobsRescheduled asserts that a
+// batch-level transient provider error causes every job in the batch to be
+// rescheduled, not failed permanently, and that FetchPairs is called once (T-4).
+func TestWorker_BatchLevelTransientError_AllJobsRescheduled(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	provider := &fake.Fake{
+		BatchError: &ratesprovider.ProviderError{Code: "transient", Message: "upstream timeout"},
+	}
+
+	gen := idgen.NewSeq()
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		Attempts:  0,
+		NextRunAt: clk.Now(),
+	})
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "USD",
+		Quote:     "EUR",
+		Attempts:  0,
+		NextRunAt: clk.Now(),
+	})
+
+	w := worker.New(q, q, provider, repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(2),
+		worker.WithMaxAttempts(3),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	require.Equal(t, 1, provider.Calls,
+		"FetchPairs must be called exactly once even on batch-level transient error")
+
+	// Both jobs must be rescheduled (re-reservable after backoff elapses).
+	clk.Advance(backoff.Compute(0) + time.Second)
+	remaining, err := q.Reserve(context.Background(), 10, time.Second)
+	require.NoError(t, err)
+	require.Len(t, remaining, 2,
+		"both jobs must be rescheduled (re-reservable) after batch-level transient error")
+}
+
+// TestWorkerNew_PanicWhenWithBatchSizeOmitted asserts that worker.New panics
+// with a message naming WithBatchSize when that option is omitted (T-6).
+func TestWorkerNew_PanicWhenWithBatchSizeOmitted(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Now())
+	q := memqueue.New(clk)
+
+	var recovered interface{}
+	func() {
+		defer func() { recovered = recover() }()
+		_ = worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
+			worker.WithPollInterval(1*time.Second),
+			// WithBatchSize intentionally omitted
+		)
+	}()
+
+	require.NotNil(t, recovered,
+		"worker.New must panic when WithBatchSize is omitted")
+	require.Contains(t, fmt.Sprintf("%v", recovered), "WithBatchSize",
+		"panic message must name the missing WithBatchSize option")
+}
+
+// TestWorkerNew_PanicWhenWithPollIntervalOmitted asserts that worker.New panics
+// with a message naming WithPollInterval when that option is omitted (T-7).
+func TestWorkerNew_PanicWhenWithPollIntervalOmitted(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Now())
+	q := memqueue.New(clk)
+
+	var recovered interface{}
+	func() {
+		defer func() { recovered = recover() }()
+		_ = worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
+			worker.WithBatchSize(1),
+			// WithPollInterval intentionally omitted
+		)
+	}()
+
+	require.NotNil(t, recovered,
+		"worker.New must panic when WithPollInterval is omitted")
+	require.Contains(t, fmt.Sprintf("%v", recovered), "WithPollInterval",
+		"panic message must name the missing WithPollInterval option")
 }
 
 // TestWorker_AttemptBudgetExhausted_TransientBecomesFail verifies that when a

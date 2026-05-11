@@ -18,6 +18,9 @@ type Fake struct {
 	Quotes     map[ratesprovider.Pair]ratesprovider.Quote
 	BatchError *ratesprovider.ProviderError
 	Calls      int
+	// LastPairs records the pairs slice passed to the most recent FetchPairs
+	// call. Useful for asserting that batch dispatch sends all pairs in one call.
+	LastPairs []ratesprovider.Pair
 }
 
 // FetchPairs implements ratesprovider.RatesProvider.
@@ -27,6 +30,7 @@ type Fake struct {
 // (deduplicated).
 func (f *Fake) FetchPairs(_ context.Context, pairs []ratesprovider.Pair) (ratesprovider.FetchResult, error) {
 	f.Calls++
+	f.LastPairs = pairs
 
 	if f.BatchError != nil {
 		return ratesprovider.FetchResult{}, f.BatchError

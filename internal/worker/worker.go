@@ -67,8 +67,9 @@ func WithCleanInterval(d time.Duration) Option {
 }
 
 // New constructs a Worker with the given queue, cleaner, rates provider, quote
-// repo, clock, and options. Default values: pollInterval=5s, leaseTime=60s,
-// maxAttempts=5, batchSize=1, cleanInterval=60s.
+// repo, clock, and options. Default values: leaseTime=60s, maxAttempts=5,
+// cleanInterval=60s. WithPollInterval and WithBatchSize are required; New
+// panics if either is omitted.
 func New(
 	q queue.JobQueue,
 	cleaner queue.Cleaner,
@@ -83,14 +84,18 @@ func New(
 		provider:      provider,
 		repo:          repo,
 		clk:           clk,
-		pollInterval:  5 * time.Second,
 		leaseTime:     60 * time.Second,
 		maxAttempts:   5,
-		batchSize:     1,
 		cleanInterval: 60 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(w)
+	}
+	if w.pollInterval <= 0 {
+		panic("worker.New: WithPollInterval option is required")
+	}
+	if w.batchSize <= 0 {
+		panic("worker.New: WithBatchSize option is required")
 	}
 	return w
 }
@@ -117,11 +122,10 @@ func (w *Worker) Run(ctx context.Context) error {
 				obs.WorkerIterationsTotal.WithLabelValues("idle").Inc()
 			} else {
 				obs.WorkerIterationsTotal.WithLabelValues("work").Inc()
-			}
-			for _, job := range jobs {
-				obs.LogJobReserved(ctx, string(job.ID), job.Base, job.Quote)
-				startedAt := time.Now()
-				w.dispatch(ctx, job, startedAt)
+				for _, job := range jobs {
+					obs.LogJobReserved(ctx, string(job.ID), job.Base, job.Quote)
+				}
+				w.dispatchBatch(ctx, jobs, time.Now())
 			}
 		case <-cleanTicker.C:
 			w.lastIterationUnixNano.Store(time.Now().UnixNano())
@@ -137,37 +141,47 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// dispatch runs a single job to completion, handling all queue state
-// transitions (Complete, Reschedule, Fail) internally.
-func (w *Worker) dispatch(ctx context.Context, job queue.Job, startedAt time.Time) {
-	pair := ratesprovider.Pair{Base: job.Base, Quote: job.Quote}
-	res, err := w.provider.FetchPairs(ctx, []ratesprovider.Pair{pair})
+// dispatchBatch fetches quotes for all jobs in the batch with a single
+// FetchPairs call, then demultiplexes the result per job.
+func (w *Worker) dispatchBatch(ctx context.Context, jobs []queue.Job, startedAt time.Time) {
+	// Build the pairs slice for the single FetchPairs call.
+	pairs := make([]ratesprovider.Pair, len(jobs))
+	for i, job := range jobs {
+		pairs[i] = ratesprovider.Pair{Base: job.Base, Quote: job.Quote}
+	}
+
+	res, err := w.provider.FetchPairs(ctx, pairs)
 	if err != nil {
-		w.handleBatchError(ctx, job, err)
+		// Batch-level error: apply to all jobs.
+		for _, job := range jobs {
+			w.handleBatchError(ctx, job, err)
+		}
 		return
 	}
 
-	if q, ok := res.Quotes[pair]; ok {
-		// Happy path: upsert then complete.
-		if uErr := w.repo.UpsertBatch(ctx, []ratesprovider.Quote{q}); uErr != nil {
-			// Upsert failed — reschedule or fail via attempt budget.
-			wrapped := fmt.Errorf("upsert quote: %w", uErr)
-			w.rescheduleOrFail(ctx, job, wrapped)
-			return
-		}
-		if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
-			obs.LogWorkerOpFailed(ctx, "complete", cErr)
+	// Demux: process each job according to whether its pair was returned or missing.
+	for _, job := range jobs {
+		pair := ratesprovider.Pair{Base: job.Base, Quote: job.Quote}
+		if q, ok := res.Quotes[pair]; ok {
+			// Happy path: upsert then complete.
+			if uErr := w.repo.UpsertBatch(ctx, []ratesprovider.Quote{q}); uErr != nil {
+				wrapped := fmt.Errorf("upsert quote: %w", uErr)
+				w.rescheduleOrFail(ctx, job, wrapped)
+				continue
+			}
+			if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
+				obs.LogWorkerOpFailed(ctx, "complete", cErr)
+			} else {
+				attempts := job.Attempts + 1
+				obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
+				obs.QuoteJobsTotal.WithLabelValues("done").Inc()
+				obs.QuoteJobsAttempts.Observe(float64(attempts))
+			}
 		} else {
-			attempts := job.Attempts + 1
-			obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
-			obs.QuoteJobsTotal.WithLabelValues("done").Inc()
-			obs.QuoteJobsAttempts.Observe(float64(attempts))
+			// pair is in res.Missing (or absent from both — defensive): permanent fail.
+			w.failJob(ctx, job, errors.New("missing in upstream response"))
 		}
-		return
 	}
-
-	// pair is in res.Missing (or absent from both — defensive): permanent fail.
-	w.failJob(ctx, job, errors.New("missing in upstream response"))
 }
 
 // handleBatchError classifies the provider error and either reschedules or
