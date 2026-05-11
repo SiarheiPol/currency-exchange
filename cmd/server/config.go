@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -20,12 +21,29 @@ type Config struct {
 	// Env is the runtime profile. Set to "production" to disable the
 	// kin-openapi request/response validation middleware. Default: "development".
 	Env string
+
+	// SLA and worker capacity fields (capacity.md § Derived worker parameters).
+	RefreshMaxLatency time.Duration
+	WorkerCount       int
+	PollInterval      time.Duration
+	BatchSize         int
 }
 
 const defaultProviderBaseURL = "https://api.currencylayer.com"
 const defaultHTTPAddr = ":8080"
 const defaultSchedulerTickSeconds = 30
 const defaultCoalescingSeconds = 30
+
+// SLA budget constants (capacity.md § Budget decomposition).
+const (
+	upstreamP99 = 500 * time.Millisecond
+	dbP99       = 100 * time.Millisecond
+	slaMargin   = 400 * time.Millisecond
+	minSLAFloor = upstreamP99 + dbP99 + slaMargin // 1000ms
+)
+
+const defaultRefreshMaxLatencyMS = 2000
+const defaultWorkerCount = 1
 
 var defaultWhitelist = []string{"USD", "EUR", "MXN"}
 
@@ -83,6 +101,46 @@ func Load() (*Config, error) {
 		return nil, errors.New("COALESCING_WINDOW_SECONDS must be > 0")
 	}
 	cfg.CoalescingWindow = time.Duration(coalescingSeconds) * time.Second
+
+	// REFRESH_MAX_LATENCY_MS
+	refreshMS := defaultRefreshMaxLatencyMS
+	if v := os.Getenv("REFRESH_MAX_LATENCY_MS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, errors.New("REFRESH_MAX_LATENCY_MS must be an integer")
+		}
+		refreshMS = n
+	}
+	cfg.RefreshMaxLatency = time.Duration(refreshMS) * time.Millisecond
+	if cfg.RefreshMaxLatency < minSLAFloor {
+		return nil, fmt.Errorf(
+			"REFRESH_MAX_LATENCY_MS=%d is below the minimum achievable SLA of %dms (upstream_p99=%s + db_p99=%s + margin=%s)",
+			refreshMS, minSLAFloor.Milliseconds(), upstreamP99, dbP99, slaMargin,
+		)
+	}
+
+	// WORKER_COUNT
+	workerCount := defaultWorkerCount
+	if v := os.Getenv("WORKER_COUNT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, errors.New("WORKER_COUNT must be an integer")
+		}
+		workerCount = n
+	}
+	if workerCount < 1 {
+		return nil, errors.New("WORKER_COUNT must be >= 1")
+	}
+	cfg.WorkerCount = workerCount
+
+	// Derived fields.
+	cfg.PollInterval = cfg.RefreshMaxLatency - upstreamP99 - dbP99 - slaMargin
+
+	pairs := len(cfg.WhitelistCurrencies) * (len(cfg.WhitelistCurrencies) - 1)
+	cfg.BatchSize = (pairs + cfg.WorkerCount - 1) / cfg.WorkerCount
+	if cfg.BatchSize < 1 {
+		cfg.BatchSize = 1
+	}
 
 	return cfg, nil
 }

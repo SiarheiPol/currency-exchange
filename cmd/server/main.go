@@ -81,6 +81,11 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	obs.Logger(rootCtx).Info(obs.EvWorkerConfigDerived,
+		"poll_interval", cfg.PollInterval,
+		"batch_size", cfg.BatchSize,
+	)
+
 	pool, err := pgxpool.New(rootCtx, cfg.DBDSN)
 	if err != nil {
 		return fmt.Errorf("pgxpool.New: %w", err)
