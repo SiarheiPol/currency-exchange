@@ -11,7 +11,7 @@ Go HTTP service providing currency exchange rate quotes via an asynchronous refr
 | `/quotes/latest/:currency` | GET | read the latest successful quote |
 | `/healthz` | GET | liveness probe |
 | `/readyz` | GET | readiness probe (DB ping + scheduler + worker checks) |
-| `/metrics` | GET | Prometheus metrics |
+| `/metrics` | GET | Prometheus metrics (service collectors plus standard Go runtime and process collectors) |
 | `/openapi.yaml` | GET | API specification (source of truth) |
 | `/docs/` | GET | Swagger UI |
 

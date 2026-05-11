@@ -130,3 +130,32 @@ func TestAllMetricNames_ContainsQuoteJobsCompletionSeconds(t *testing.T) {
 		"AllMetricNames must contain MetricQuoteJobsCompletionSeconds (%q)",
 		obs.MetricQuoteJobsCompletionSeconds)
 }
+
+// TestNewRegistry_IncludesGoAndProcessCollectors asserts that the registry
+// returned by obs.NewRegistry() gathers both the standard Go runtime (go_*)
+// and process (process_*) metric families in addition to the service metrics.
+//
+// CI runs only on ubuntu-latest (Linux), so no OS skip guard is needed: the
+// ProcessCollector emits process_* families on Linux unconditionally.
+func TestNewRegistry_IncludesGoAndProcessCollectors(t *testing.T) {
+	t.Parallel()
+
+	reg := obs.NewRegistry()
+	families, err := reg.Gather()
+
+	require.NoError(t, err, "Gather must not return an error")
+
+	gathered := make(map[string]bool, len(families))
+	for _, f := range families {
+		gathered[f.GetName()] = true
+	}
+
+	assert.True(t, gathered["go_goroutines"],
+		"metric %q must be present in gathered families", "go_goroutines")
+	assert.True(t, gathered["go_memstats_alloc_bytes"],
+		"metric %q must be present in gathered families", "go_memstats_alloc_bytes")
+	assert.True(t, gathered["process_resident_memory_bytes"],
+		"metric %q must be present in gathered families", "process_resident_memory_bytes")
+	assert.True(t, gathered["process_open_fds"],
+		"metric %q must be present in gathered families", "process_open_fds")
+}

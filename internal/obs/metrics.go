@@ -1,6 +1,9 @@
 package obs
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+)
 
 // Metric name constants are the canonical names for all Prometheus metrics
 // exposed by the service. Callers must reference these constants rather than
@@ -259,10 +262,15 @@ func init() {
 		RatesProviderResponseAnomaliesTotal,
 		QuoteJobsCompletionSeconds,
 	)
+	defaultRegistry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
 }
 
-// NewRegistry returns the package-level singleton *prometheus.Registry. All 15
-// service collectors are pre-registered and pre-initialised. Callers must not
-// register additional collectors into this registry; use the exported package
-// variables (e.g. obs.HTTPRequestsTotal) to record observations.
+// NewRegistry returns the package-level singleton *prometheus.Registry. The
+// registry contains the 15 service collectors plus the standard Go runtime and
+// process collectors, all pre-registered. Callers must not register additional
+// collectors into this registry; use the exported package variables (e.g.
+// obs.HTTPRequestsTotal) to record observations.
 func NewRegistry() *prometheus.Registry { return defaultRegistry }
