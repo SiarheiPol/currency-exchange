@@ -134,7 +134,7 @@ Path label is the **route template** (`/quotes/:id`), not the concrete URL — o
 | `quote_jobs_pending_count` | gauge | Current queue depth. Alert if it grows. |
 | `quote_jobs_total` | counter, label `status` | Cumulative by terminal status (`done`, `failed`). |
 | `quote_jobs_attempts` | histogram | How many tries jobs needed to reach `done`. |
-| `worker_iterations_total` | counter, label `outcome` (`work`, `idle`, `error`) | Worker activity. |
+| `worker_iterations_total` | counter, label `outcome` (`work`, `idle`, `error` on the poll branch; `ok`, `error` on the clean branch — the latter increments per `RecoverExpired` tick) | Worker activity. |
 | `scheduler_ticks_total` | counter | Tick count. |
 | `scheduler_last_tick_seconds_ago` | gauge | Updated on each tick. Alert if stale. |
 | `coalescing_collapsed_total` | counter | Enqueues that joined an existing job. |
