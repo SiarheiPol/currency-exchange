@@ -205,7 +205,6 @@ These are designed but explicitly deferred. Each becomes a stage on its own when
   - [ ] Profile 2 smoke (read storm): `GET /quotes/latest` at high RPS, scalability check
   - [ ] Profile 3 smoke (refresh burst): sustained `POST /quotes/refresh` across distinct pairs, queue drain
   - [ ] Profile 5 (failure injection): fake-provider latency + error modes, resilience check
-  - [ ] CI job: smoke tier on every PR (profiles 1 + 4), full tier nightly
   - [ ] Dashboard + alert validation pass: verify `monitoring.md` panels render correctly under load, tune alert thresholds against measured baselines
   - [ ] Capacity measurements: replace `capacity.md` estimates with measured p99 values
 
