@@ -18,15 +18,10 @@ import (
 	"currency-exchange/internal/worker"
 )
 
-// TestWorkerWiring_DerivedConfigReachesWorker asserts that the PollInterval and
-// BatchSize values derived by Load() are passed to worker.New via the wiring
-// path in run(), and that the worker consequently issues exactly one FetchPairs
-// call for a full batch (T-5).
-//
 // Config: REFRESH_MAX_LATENCY_MS=2000, default whitelist [USD,EUR,MXN],
-// WORKER_COUNT=1 → PollInterval=1s, BatchSize=6.
-// The test enqueues 6 jobs (all distinct pairs), runs one tick, and asserts
-// provider.Calls==1 and len(provider.LastPairs)==6.
+// WORKER_COUNT=1 → PollInterval=1s, BatchSize=6. Enqueues 6 distinct-pair
+// jobs and asserts a single FetchPairs call carries all 6 pairs — proving
+// derived values flow from Load() through run() into worker.New.
 func TestWorkerWiring_DerivedConfigReachesWorker(t *testing.T) {
 	// NOT t.Parallel: uses t.Setenv which mutates process environment.
 

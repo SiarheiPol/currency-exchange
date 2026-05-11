@@ -521,9 +521,6 @@ func TestWorker_QuotaExceeded_ReschedulesPlusOneHour(t *testing.T) {
 // Stage 4.5 dispatch tests (group-by-base)
 // ---------------------------------------------------------------------------
 
-// TestWorker_SingleBaseBatch_OneFetchPairsCall asserts that when the worker
-// reserves a batch of jobs with the same base currency it calls FetchPairs
-// exactly once with all pairs, rather than once per job (T-1).
 func TestWorker_SingleBaseBatch_OneFetchPairsCall(t *testing.T) {
 	t.Parallel()
 
@@ -574,9 +571,6 @@ func TestWorker_SingleBaseBatch_OneFetchPairsCall(t *testing.T) {
 	require.Empty(t, remaining, "all 3 jobs must be completed after single-batch dispatch")
 }
 
-// TestWorker_MultiBaseBatch_OneFetchPairsCall asserts that when the worker
-// reserves jobs from distinct base currencies it still calls FetchPairs exactly
-// once with all pairs in the batch (T-2).
 func TestWorker_MultiBaseBatch_OneFetchPairsCall(t *testing.T) {
 	t.Parallel()
 
@@ -636,9 +630,6 @@ func TestWorker_MultiBaseBatch_OneFetchPairsCall(t *testing.T) {
 	require.True(t, ok2, "USD/EUR quote must be present in repo")
 }
 
-// TestWorker_BatchDemux_MissingPairFails asserts that when a batch contains a
-// pair absent from the provider response, that job is permanently failed while
-// the present pairs are completed (T-3).
 func TestWorker_BatchDemux_MissingPairFails(t *testing.T) {
 	t.Parallel()
 
@@ -713,9 +704,6 @@ func TestWorker_BatchDemux_MissingPairFails(t *testing.T) {
 	require.False(t, ok3, "EUR/GBP must not be in repo after missing-pair failure")
 }
 
-// TestWorker_BatchLevelTransientError_AllJobsRescheduled asserts that a
-// batch-level transient provider error causes every job in the batch to be
-// rescheduled, not failed permanently, and that FetchPairs is called once (T-4).
 func TestWorker_BatchLevelTransientError_AllJobsRescheduled(t *testing.T) {
 	t.Parallel()
 
@@ -768,8 +756,6 @@ func TestWorker_BatchLevelTransientError_AllJobsRescheduled(t *testing.T) {
 		"both jobs must be rescheduled (re-reservable) after batch-level transient error")
 }
 
-// TestWorkerNew_PanicWhenWithBatchSizeOmitted asserts that worker.New panics
-// with a message naming WithBatchSize when that option is omitted (T-6).
 func TestWorkerNew_PanicWhenWithBatchSizeOmitted(t *testing.T) {
 	t.Parallel()
 
@@ -791,8 +777,6 @@ func TestWorkerNew_PanicWhenWithBatchSizeOmitted(t *testing.T) {
 		"panic message must name the missing WithBatchSize option")
 }
 
-// TestWorkerNew_PanicWhenWithPollIntervalOmitted asserts that worker.New panics
-// with a message naming WithPollInterval when that option is omitted (T-7).
 func TestWorkerNew_PanicWhenWithPollIntervalOmitted(t *testing.T) {
 	t.Parallel()
 
