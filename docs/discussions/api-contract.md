@@ -79,8 +79,7 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
   "base":       "EUR",
   "quote":      "MXN",
   "status":     "pending",
-  "created_at": "2026-04-29T08:00:00Z",
-  "attempts":   1
+  "created_at": "2026-04-29T08:00:00Z"
 }
 ```
 
@@ -109,10 +108,11 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
   "status":       "failed",
   "created_at":   "2026-04-29T08:00:00Z",
   "completed_at": "2026-04-29T08:01:30Z",
-  "attempts":     5,
   "error":        { "code": "upstream_unavailable", "message": "rates provider returned success:false, api_code=104" }
 }
 ```
+
+`attempts` (the worker's retry counter) is intentionally not exposed in either `pending` or `failed` bodies — it is an internal lifecycle detail. The client cannot act on it: the polling cadence is bounded by `Retry-After: 1` on pending and by `Cache-Control: max-age=…, immutable` on the terminal responses. Operators read attempt counts from logs and `quote_jobs_attempts` histogram in Prometheus.
 
 **HTTP codes used by this endpoint:**
 
