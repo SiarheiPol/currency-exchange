@@ -135,7 +135,7 @@ Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_MS` 
   - `internal/obs/metrics.go` — register `quote_jobs_completion_seconds` histogram with label `source`; buckets `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (must include `REFRESH_MAX_LATENCY_MS / 1000` exactly as a bucket boundary; the default `2000ms → 2s` is already in the suggested set)
   - `internal/worker/worker.go` — observe `Complete_at − created_at` on first successful `Complete` only; jobs with `attempts > 0` are NOT observed (they belong to job-success metrics)
   - Acute alert `quote_jobs_completion_seconds{source="refresh"}` p99 > `REFRESH_MAX_LATENCY_MS / 1000` for 10m lives in the alerting repo; multi-window burn-rate alerts also there — see `monitoring.md > Alerts (outline)` and `monitoring.md > SLO and SLI thinking > Job completion SLI`
-- [ ] `.env.example` and `README.md` — document `REFRESH_MAX_LATENCY_MS` (integer milliseconds; default `2000`), note `pollInterval`/`batchSize` are derived
+- [x] `.env.example` and `README.md` — document `REFRESH_MAX_LATENCY_MS` (integer milliseconds; default `2000`), note `pollInterval`/`batchSize` are derived
 
 ---
 

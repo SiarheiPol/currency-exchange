@@ -70,9 +70,13 @@ Key variables:
 | `COALESCING_WINDOW_SECONDS` | 30 | dedup bucket size `W` (constraint: `W ≤ T`) |
 | `WORKER_COUNT` | 1 | number of worker goroutines `K` |
 | `WHITELIST_CURRENCIES` | `USD,EUR,MXN` | comma-separated supported currencies |
+| `REFRESH_MAX_LATENCY_MS` | 2000 | SLA upper bound on refresh p99 (integer ms; floor 1000) |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 
-Tariff-plan-specific tuning is in [docs/discussions/capacity.md](docs/discussions/capacity.md).
+The worker's `pollInterval` and `batchSize` are derived from
+`REFRESH_MAX_LATENCY_MS`, `WHITELIST_CURRENCIES`, and `WORKER_COUNT` — not
+separate env vars. Effective values are logged at startup as `derived worker
+config`. Tariff-plan-specific tuning is in [docs/discussions/capacity.md](docs/discussions/capacity.md).
 
 ## Development
 
