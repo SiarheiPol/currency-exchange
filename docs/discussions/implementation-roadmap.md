@@ -166,13 +166,13 @@ A standalone binary that imitates the apilayer-family (currencylayer). Lets revi
 
 ### Compose stack
 
-- [ ] `docker-compose.yml` — service + Postgres + Prometheus + Grafana + fake provider
-- [ ] Service wired against the fake provider **by default**; real upstream requires explicit env override
-- [ ] Grafana dashboards auto-provisioned from `deploy/grafana/dashboards/*.json`:
+- [x] `docker-compose.yml` — service + Postgres + Prometheus + Grafana + fake provider
+- [x] Service wired against the fake provider **by default**; real upstream requires explicit env override
+- [x] Grafana dashboards auto-provisioned from `deploy/grafana/dashboards/*.json`:
   - `service-health.json` — RED metrics, runtime stats
   - `queue-health.json` — pending count, throughput, attempts, scheduler/worker liveness
   - `upstream-health.json` — provider rate, latency, error breakdown, quota usage
-- [ ] Prometheus alert rules auto-provisioned from `deploy/prometheus/rules.yaml`, covering the alerts listed in `monitoring.md`
+- [x] Prometheus alert rules auto-provisioned from `deploy/prometheus/rules.yaml`, covering the alerts listed in `monitoring.md`
 
 ### Latency SLA empirical validation
 

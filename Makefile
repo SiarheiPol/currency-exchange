@@ -2,7 +2,8 @@
         build build-server build-fakeprovider \
         run run-fakeprovider \
         migrate-up migrate-down \
-        docker-build-server docker-build-fakeprovider
+        docker-build-server docker-build-fakeprovider \
+        compose-validate
 
 COVERAGE_FILE ?= coverage.out
 
@@ -54,7 +55,12 @@ migrate-down:
 	go tool migrate -path migrations -database "$(DB_DSN)" down 1
 
 docker-build-server:
-	docker build --target server -t plata-server:dev .
+	docker build --target server -t currency-exchange-server:dev .
 
 docker-build-fakeprovider:
-	docker build --target fakeprovider -t plata-fakeprovider:dev .
+	docker build --target fakeprovider -t currency-exchange-fakeprovider:dev .
+
+compose-validate:
+	docker compose config --quiet
+	docker run --rm --entrypoint="" -v "$(PWD)/deploy/prometheus:/etc/prometheus:ro" \
+		prom/prometheus:v2.55.1 promtool check config /etc/prometheus/prometheus.yml

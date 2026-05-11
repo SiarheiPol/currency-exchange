@@ -8,13 +8,47 @@ A REST service that returns current exchange rates between whitelisted currency 
 - Docker (for building images, running Postgres locally)
 - PostgreSQL 16 (provided via Docker for local development)
 
-## Quick start (local, without Compose)
+## Quick start
 
-Compose stack is coming in a follow-up iteration. For now, run the pieces directly:
+```bash
+docker compose up -d
+```
+
+Wait for the stack to become healthy (~15 seconds), then visit:
+
+- Service: `http://localhost:8080/healthz`
+- Grafana: `http://localhost:3000` — login `admin/admin`
+  - Dashboards: Service Health, Queue Health, Upstream Health (auto-provisioned)
+- Prometheus: `http://localhost:9090` — `Alerts` tab shows the configured rules
+
+Stop the stack:
+
+```bash
+docker compose down       # keep DB volume
+docker compose down -v    # also delete DB and Prometheus data
+```
+
+### Configuration overrides
+
+The stack defaults to the fake rates provider (`fakeprovider` service). To point at the real apilayer upstream, copy `.env.example` to `.env` and uncomment the relevant lines:
+
+```
+PROVIDER_BASE_URL=https://api.currencylayer.com
+PROVIDER_API_KEY=your-real-key
+GF_ADMIN_PASSWORD=changeme-for-non-local-deployments
+```
+
+Compose auto-loads `.env`. The file is `.gitignored`.
+
+> **Note:** Docker Compose reads the repo-root `.env` for **every** invocation. If you set `PROVIDER_BASE_URL` and `PROVIDER_API_KEY` for `make run` (without Compose), those values will also override the fake-provider defaults the next time you run `docker compose up`. Symptom: the server fails to start with an apilayer `api_code=101` error. Either comment out those lines before `docker compose up`, or skip `.env` entirely via `docker compose --env-file /dev/null up -d`.
+
+## Running without Compose (for IDE development)
+
+If you prefer to run the binaries directly:
 
 ```bash
 # Terminal 1: Postgres
-docker run --rm -d --name plata-pg \
+docker run --rm -d --name currency-exchange-pg \
   -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=quotes \
@@ -40,6 +74,7 @@ Visit `http://localhost:8080/healthz` to confirm.
 ```bash
 make build                    # both binaries to ./bin/
 make check                    # generate + go test -race + golangci-lint
+make compose-validate         # validate docker-compose.yml + Prometheus config
 make docker-build-server      # build server image
 make docker-build-fakeprovider
 ```

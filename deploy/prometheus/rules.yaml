@@ -1,0 +1,77 @@
+groups:
+  - name: currency-exchange.alerts
+    interval: 30s
+    rules:
+      - alert: HighHTTP5xxRate
+        # Threshold: 1% server error rate sustained for 10 minutes.
+        # Tune for your deployment — see docs/discussions/monitoring.md.
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx rate exceeds 1% for 10 minutes"
+          description: "Server is returning 5xx errors at a sustained rate. Check logs and upstream provider health."
+
+      - alert: HighHTTPLatencyP99
+        # Threshold: p99 > 1s — placeholder. Real SLO budget lives in capacity.md.
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p99 latency exceeds 1s for 10 minutes"
+          description: "Tail latency degraded. Check worker saturation, DB latency, upstream provider."
+
+      - alert: SchedulerStale
+        # 2× default SCHEDULER_TICK_SECONDS=30 → 60s.
+        expr: scheduler_last_tick_seconds_ago > 60
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scheduler has not ticked in over 60 seconds"
+          description: "Background scheduler appears stuck. Refresh-driven jobs will starve."
+
+      - alert: QueueBacklog
+        # Threshold: whitelist_size (3) × N (10) = 30. Tune for whitelist + WORKER_COUNT.
+        expr: quote_jobs_pending_count > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quote-jobs queue backlog exceeds 30 pending"
+          description: "Workers are not draining the queue. Check worker liveness and upstream errors."
+
+      - alert: ReadyzFailing
+        expr: up{job="server"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Server scrape target down"
+          description: "Prometheus cannot reach the server's /metrics endpoint."
+
+      - alert: RefreshSLABreach
+        # Default REFRESH_MAX_LATENCY_MS=2000 → 2s threshold.
+        # If you change REFRESH_MAX_LATENCY_MS, update this threshold.
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(quote_jobs_completion_seconds_bucket{source="refresh"}[5m]))
+          ) > 2.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Refresh-driven job completion p99 exceeds 2s for 10 minutes"
+          description: "POST /quotes/refresh SLA breach. Investigate worker poll interval, upstream latency, DB latency."
+
+      # TODO: UpstreamQuotaHigh — requires rates_provider_quota_limit metric
+      # to compute the 80% ratio. Currently rates_provider_quota_used is a
+      # gauge with no exposed denominator. Add this alert once the limit
+      # metric is wired or as an operator-supplied recording rule.
