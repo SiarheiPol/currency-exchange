@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,10 +19,42 @@ import (
 	"currency-exchange/internal/queue"
 )
 
-// QueueFactory creates a fresh queue.JobQueue backed by the given clock.
+// QueueFactory creates a fresh queue.JobQueue backed by the given clock and
+// returns it together with a ReadBackFn bound to the same backing storage. The
+// pair is returned together so each subtest's readBack is isolated to its own
+// queue instance — important under t.Parallel() where subtests run concurrently.
 // Each subtest receives its own factory call so state does not leak between
 // subtests.
-type QueueFactory func(t *testing.T, clk clock.Clock) queue.JobQueue
+type QueueFactory func(t *testing.T, clk clock.Clock) (queue.JobQueue, ReadBackFn)
+
+// ReadBackFn is a test-time backdoor that reads the persisted price,
+// quote_updated_at, and status for a job by its ID directly from the
+// implementation's storage. It is passed by the caller of
+// RunJobQueueContractTests so that the contract test for
+// Complete_PersistsPriceAndQuoteUpdatedAt can assert without requiring a
+// public GetByID method on JobQueue (that is iter 8 scope).
+//
+// Implementations:
+//   - memqueue: closure over *memqueue.Queue, reads q.jobs[id] fields.
+//     memqueue.record does not yet have price/quote_updated_at fields — that
+//     is the implementer's job. The test calls this closure; it references
+//     not-yet-existing fields. This IS the RED state for memqueue.
+//   - pgqueue: closure runs
+//     SELECT price, quote_updated_at, status FROM quote_jobs WHERE id = $1.
+//     The column does not yet exist (migration 000005 is the implementer's
+//     job). The test compiles but the SQL fails at runtime — also a valid RED.
+type ReadBackFn func(ctx context.Context, id queue.JobID) (price decimal.Decimal, quoteUpdatedAt time.Time, status string, err error)
+
+// dummyPrice is the canonical non-trivial price used across contract tests
+// that call Complete with a price argument. Matches the running example in
+// api-contract.md ("1 EUR = 20.255648 MXN").
+var dummyPrice = decimal.RequireFromString("20.255648")
+
+// dummyQuoteTime is a fixed timestamp used as the quote_updated_at argument
+// in Complete calls throughout the contract suite. It is chosen to differ
+// clearly from "now" so assertions can confirm the field was persisted rather
+// than substituted with a server-side timestamp.
+var dummyQuoteTime = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
 // newJob builds a queue.Job whose ID is drawn from idg and whose Base, Quote
 // and DedupKey are set to the supplied values. NextRunAt is set to clk.Now().
@@ -45,7 +78,10 @@ func newJob(clk clock.Clock, idg idgen.IDGenerator, base, quote, dedupKey string
 const ghostID = queue.JobID("00000000-0000-0000-0000-000000000099")
 
 // RunJobQueueContractTests runs the full contract test suite against any
-// queue.JobQueue produced by factory.
+// queue.JobQueue produced by factory. The factory's second return value is a
+// per-instance ReadBackFn used by Complete/PersistsPriceAndQuoteUpdatedAt to
+// verify the persisted price and quote_updated_at fields without a public
+// GetByID method on JobQueue.
 func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Helper()
 
@@ -54,7 +90,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Enqueue/NewJob", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -69,7 +105,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Enqueue/DuplicateDedupKey_ReturnsFalse", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -90,7 +126,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Enqueue/DuplicateDedupKey_StatusUnaware", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -102,7 +138,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		require.NoError(t, err)
 		require.Len(t, reserved, 1)
 
-		err = q.Complete(ctx, job1.ID)
+		err = q.Complete(ctx, job1.ID, dummyPrice, dummyQuoteTime)
 		require.NoError(t, err)
 
 		job2 := newJob(clk, idg, "GBP", "CHF", "k1")
@@ -115,7 +151,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Enqueue/EmptyDedupKey_AllowsMultiple", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -141,7 +177,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		t.Parallel()
 		base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		clk := clock.NewFake(base)
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -194,7 +230,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reserve/PreservesPair", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -213,7 +249,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reserve/RespectsNLimit", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -232,7 +268,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		t.Parallel()
 		base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		clk := clock.NewFake(base)
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -268,7 +304,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reserve/MarksRunning_SubsequentSkips", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -288,7 +324,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reserve/ReturnsValueCopies", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -304,7 +340,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		reserved[0].Base = "MUTATED"
 
 		// Complete still works, proving the queue holds an independent copy.
-		err = q.Complete(ctx, job.ID)
+		err = q.Complete(ctx, job.ID, dummyPrice, dummyQuoteTime)
 		assert.NoError(t, err)
 	})
 
@@ -313,7 +349,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Complete/MarksJobDone", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -324,14 +360,14 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		_, err = q.Reserve(ctx, 1, 60*time.Second)
 		require.NoError(t, err)
 
-		err = q.Complete(ctx, job.ID)
+		err = q.Complete(ctx, job.ID, dummyPrice, dummyQuoteTime)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Complete/SecondComplete_ErrNotReserved", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -342,27 +378,27 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		_, err = q.Reserve(ctx, 1, 60*time.Second)
 		require.NoError(t, err)
 
-		err = q.Complete(ctx, job.ID)
+		err = q.Complete(ctx, job.ID, dummyPrice, dummyQuoteTime)
 		require.NoError(t, err)
 
-		err = q.Complete(ctx, job.ID)
+		err = q.Complete(ctx, job.ID, dummyPrice, dummyQuoteTime)
 		assert.True(t, errors.Is(err, queue.ErrNotReserved))
 	})
 
 	t.Run("Complete/ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		ctx := context.Background()
 
-		err := q.Complete(ctx, ghostID)
+		err := q.Complete(ctx, ghostID, dummyPrice, dummyQuoteTime)
 		assert.True(t, errors.Is(err, queue.ErrNotFound))
 	})
 
 	t.Run("Complete/ErrNotReserved_WhenPending", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -370,8 +406,49 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
 
-		err = q.Complete(ctx, job.ID)
+		err = q.Complete(ctx, job.ID, dummyPrice, dummyQuoteTime)
 		assert.True(t, errors.Is(err, queue.ErrNotReserved))
+	})
+
+	// Complete/PersistsPriceAndQuoteUpdatedAt verifies that after a successful
+	// Complete call the price and quote_updated_at values passed as arguments are
+	// persisted on the job row (read back via the readBack backdoor), and that
+	// the job's status is "done".
+	//
+	// This is the primary test for the iter 7.5 contract:
+	//   Complete(ctx, id, price, quoteUpdatedAt) persists both fields so that
+	//   GET /quotes/:id for a done job can return Cache-Control: immutable.
+	t.Run("Complete/PersistsPriceAndQuoteUpdatedAt", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q, readBack := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		wantPrice := decimal.RequireFromString("20.255648")
+		// wantQuoteTime is explicitly different from clk.Now() (the complete
+		// timestamp) so we can confirm the field is persisted from the argument
+		// rather than being replaced by a server-side now().
+		wantQuoteTime := time.Date(2025, 6, 15, 9, 30, 0, 0, time.UTC)
+
+		job := newJob(clk, idg, "EUR", "MXN", "persist-price-k1")
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		_, err = q.Reserve(ctx, 1, 60*time.Second)
+		require.NoError(t, err)
+
+		err = q.Complete(ctx, job.ID, wantPrice, wantQuoteTime)
+		require.NoError(t, err)
+
+		gotPrice, gotQuoteTime, gotStatus, rbErr := readBack(ctx, job.ID)
+		require.NoError(t, rbErr, "readBack must not error after a successful Complete")
+
+		assert.Equal(t, "done", gotStatus, "job status must be 'done' after Complete")
+		assert.True(t, wantPrice.Equal(gotPrice),
+			"persisted price %s must equal argument %s", gotPrice, wantPrice)
+		assert.True(t, wantQuoteTime.Equal(gotQuoteTime),
+			"persisted quote_updated_at %v must equal argument %v", gotQuoteTime, wantQuoteTime)
 	})
 
 	// --- Reschedule ---
@@ -379,7 +456,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reschedule/ReturnsToPendingWithUpdatedFields", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -405,7 +482,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reschedule/NotEligibleBeforeNextRunAt", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -428,7 +505,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reschedule/ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		ctx := context.Background()
 
 		err := q.Reschedule(ctx, ghostID, "r", 5*time.Second)
@@ -438,7 +515,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Reschedule/ErrNotReserved_WhenPending", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -455,7 +532,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Fail/MarksJobFailed", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -477,7 +554,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Fail/ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		ctx := context.Background()
 
 		err := q.Fail(ctx, ghostID, "r")
@@ -487,7 +564,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Fail/ErrNotReserved_WhenPending", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -504,10 +581,10 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("ErrorSentinels/ErrNotFound_IsTestable", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		ctx := context.Background()
 
-		err := q.Complete(ctx, ghostID)
+		err := q.Complete(ctx, ghostID, dummyPrice, dummyQuoteTime)
 		assert.True(t, errors.Is(err, queue.ErrNotFound), "Complete: want ErrNotFound, got %v", err)
 
 		err = q.Reschedule(ctx, ghostID, "r", 5*time.Second)
@@ -520,7 +597,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("ErrorSentinels/ErrNotReserved_IsTestable", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -534,7 +611,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		}
 
 		id1 := enqueueAndGet()
-		err := q.Complete(ctx, id1)
+		err := q.Complete(ctx, id1, dummyPrice, dummyQuoteTime)
 		assert.True(t, errors.Is(err, queue.ErrNotReserved), "Complete: want ErrNotReserved, got %v", err)
 
 		id2 := enqueueAndGet()
@@ -551,7 +628,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Source/RefreshRoundTrips", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -575,7 +652,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Source/SchedulerRoundTrips", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -600,7 +677,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		t.Parallel()
 		t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 		clk := clock.NewFake(t0)
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -628,7 +705,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Source/EmptySourceReturnsErrInvalidSource", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -653,7 +730,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Source/InvalidSourceReturnsErrInvalidSource", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		idg := idgen.NewSeq()
 		ctx := context.Background()
 
@@ -675,7 +752,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 	t.Run("Concurrency/SameDedupKey_OnlyOneInserts", func(t *testing.T) {
 		t.Parallel()
 		clk := clock.NewFake(time.Now())
-		q := factory(t, clk)
+		q, _ := factory(t, clk)
 		ctx := context.Background()
 
 		type result struct {

@@ -169,7 +169,7 @@ func (w *Worker) dispatchBatch(ctx context.Context, jobs []queue.Job, startedAt 
 				w.rescheduleOrFail(ctx, job, wrapped)
 				continue
 			}
-			if cErr := w.q.Complete(ctx, job.ID); cErr != nil {
+			if cErr := w.q.Complete(ctx, job.ID, q.Price, q.FetchedAt); cErr != nil {
 				obs.LogWorkerOpFailed(ctx, "complete", cErr)
 			} else {
 				attempts := job.Attempts + 1

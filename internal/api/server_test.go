@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -76,7 +77,9 @@ func (fakeErrQueue) Enqueue(_ context.Context, _ queue.Job) (queue.JobID, bool, 
 func (fakeErrQueue) Reserve(_ context.Context, _ int, _ time.Duration) ([]queue.Job, error) {
 	return nil, nil
 }
-func (fakeErrQueue) Complete(_ context.Context, _ queue.JobID) error { return nil }
+func (fakeErrQueue) Complete(_ context.Context, _ queue.JobID, _ decimal.Decimal, _ time.Time) error {
+	return nil
+}
 func (fakeErrQueue) Reschedule(_ context.Context, _ queue.JobID, _ string, _ time.Duration) error {
 	return nil
 }

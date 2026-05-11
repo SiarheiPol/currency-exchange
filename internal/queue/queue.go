@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // JobID identifies a single quote-refresh job. Wraps a string so the type
@@ -60,9 +62,13 @@ type JobQueue interface {
 	// Reschedule, or Fail.
 	Reserve(ctx context.Context, n int, lease time.Duration) ([]Job, error)
 
-	// Complete marks the job done. Returns ErrNotFound if no job has the
-	// given id.
-	Complete(ctx context.Context, id JobID) error
+	// Complete marks the job done and persists the fetched quote snapshot so
+	// that GET /quotes/:id for a done job can serve Cache-Control: immutable.
+	// price and quoteUpdatedAt are written to the job row alongside the status
+	// transition; they are independent of the mutable quotes cache. Returns
+	// ErrNotFound if no job has the given id, ErrNotReserved if the job is not
+	// currently running.
+	Complete(ctx context.Context, id JobID, price decimal.Decimal, quoteUpdatedAt time.Time) error
 
 	// Reschedule returns the job to pending with NextRunAt = now + after,
 	// records the reason as last_error, and increments Attempts. Returns

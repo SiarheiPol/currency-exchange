@@ -12,7 +12,10 @@ import (
 // TestJobQueueContract_MemQueue runs the shared queue contract suite against
 // the in-memory implementation.
 func TestJobQueueContract_MemQueue(t *testing.T) {
-	queuetest.RunJobQueueContractTests(t, func(t *testing.T, clk clock.Clock) queue.JobQueue {
-		return memqueue.New(clk)
-	})
+	queuetest.RunJobQueueContractTests(t,
+		func(t *testing.T, clk clock.Clock) (queue.JobQueue, queuetest.ReadBackFn) {
+			q := memqueue.New(clk)
+			return q, q.ReadBack
+		},
+	)
 }

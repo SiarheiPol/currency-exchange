@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
@@ -31,10 +33,12 @@ type Queue struct {
 }
 
 type record struct {
-	job        queue.Job
-	status     status
-	leaseUntil time.Time
-	createdAt  time.Time
+	job            queue.Job
+	status         status
+	leaseUntil     time.Time
+	createdAt      time.Time
+	price          decimal.Decimal
+	quoteUpdatedAt time.Time
 }
 
 var _ queue.JobQueue = (*Queue)(nil)
@@ -118,9 +122,10 @@ func (q *Queue) Reserve(_ context.Context, n int, lease time.Duration) ([]queue.
 	return result, nil
 }
 
-// Complete marks the job done. Returns ErrNotFound if no job has the given id,
-// or ErrNotReserved if the job is not currently running.
-func (q *Queue) Complete(_ context.Context, id queue.JobID) error {
+// Complete marks the job done and persists the fetched quote snapshot.
+// Returns ErrNotFound if no job has the given id, or ErrNotReserved if the
+// job is not currently running.
+func (q *Queue) Complete(_ context.Context, id queue.JobID, price decimal.Decimal, quoteUpdatedAt time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -132,7 +137,39 @@ func (q *Queue) Complete(_ context.Context, id queue.JobID) error {
 		return queue.ErrNotReserved
 	}
 	r.status = statusDone
+	r.price = price
+	r.quoteUpdatedAt = quoteUpdatedAt
 	return nil
+}
+
+// ReadBack is a test-time backdoor returning the persisted price,
+// quote_updated_at, and status for the given job. It exists so the shared
+// queue contract test can verify the denormalized snapshot without adding a
+// public GetByID method to JobQueue. Returns ErrNotFound if no job has the
+// given id.
+func (q *Queue) ReadBack(_ context.Context, id queue.JobID) (decimal.Decimal, time.Time, string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	r, ok := q.jobs[id]
+	if !ok {
+		return decimal.Zero, time.Time{}, "", queue.ErrNotFound
+	}
+	return r.price, r.quoteUpdatedAt, statusName(r.status), nil
+}
+
+func statusName(s status) string {
+	switch s {
+	case statusPending:
+		return "pending"
+	case statusRunning:
+		return "running"
+	case statusDone:
+		return "done"
+	case statusFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
 }
 
 // Reschedule returns the job to pending with NextRunAt = now + after and

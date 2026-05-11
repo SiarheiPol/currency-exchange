@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/obs"
@@ -132,16 +133,18 @@ func (q *Queue) Reserve(ctx context.Context, n int, lease time.Duration) ([]queu
 	return jobs, nil
 }
 
-// Complete marks the job done.
-func (q *Queue) Complete(ctx context.Context, id queue.JobID) error {
+// Complete marks the job done and persists the fetched quote snapshot.
+func (q *Queue) Complete(ctx context.Context, id queue.JobID, price decimal.Decimal, quoteUpdatedAt time.Time) error {
 	now := q.clk.Now()
 	tag, err := q.pool.Exec(ctx, `
 		UPDATE quote_jobs
-		   SET status       = 'done',
-		       completed_at = $2,
-		       updated_at   = $2
+		   SET status           = 'done',
+		       completed_at     = $2,
+		       updated_at       = $2,
+		       price            = $3,
+		       quote_updated_at = $4
 		WHERE id = $1 AND status = 'running'`,
-		string(id), now,
+		string(id), now, price, quoteUpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("pgqueue complete: %w", err)
