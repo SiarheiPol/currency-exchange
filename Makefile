@@ -1,7 +1,9 @@
-.PHONY: check test test-integration test-fakeprovider lint generate \
+.PHONY: check test test-integration test-fakeprovider coverage coverage-html lint generate \
         build build-server build-fakeprovider \
         run run-fakeprovider \
         migrate-up migrate-down
+
+COVERAGE_FILE ?= coverage.out
 
 check: generate
 	git diff --exit-code
@@ -16,6 +18,13 @@ test-integration:
 
 test-fakeprovider:
 	go test -race ./cmd/fakeprovider/...
+
+coverage:
+	go test -race -covermode=atomic -coverpkg=./... -coverprofile=$(COVERAGE_FILE) ./...
+	go tool cover -func=$(COVERAGE_FILE) | tail -n 1
+
+coverage-html: coverage
+	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
 
 lint:
 	golangci-lint run

@@ -5,6 +5,7 @@ bin/
 /fakeprovider
 *.exe
 coverage.out
+coverage.html
 .env
 .vscode/
 docs/iteration-contracts/
