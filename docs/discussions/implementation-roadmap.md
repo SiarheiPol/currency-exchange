@@ -119,6 +119,24 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 
 ---
 
+## Stage 4.5 — Refresh latency SLA enforcement
+
+Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_SECONDS` (see `api-contract.md > POST /quotes/refresh > Latency contract` and `capacity.md > Refresh latency SLA`). The current `worker.go` defaults (`batchSize=1`, `pollInterval=5s`) cannot meet a 2s SLA by construction, and the per-job loop in `dispatch` negates the per-base batching that `apilayerProvider.FetchPairs` already implements.
+
+- [ ] `cmd/server/config.go` — read `REFRESH_MAX_LATENCY_SECONDS` (default 2s); refuse to start when `REFRESH_MAX_LATENCY < upstream_p99 + db_p99 + margin` per `capacity.md > Refresh latency SLA > Startup validation`
+- [ ] `cmd/server/config.go` — derive `pollInterval` and `batchSize` from the SLA + whitelist + `WORKER_COUNT`; log the effective values at startup (`derived worker.poll_interval=…, batch_size=…`)
+- [ ] `internal/worker/worker.go` — in the `Reserve` loop, **group reserved jobs by `Base`** before calling `FetchPairs`, then dispatch per-pair results from the batched response. Replaces the current per-job slice-of-one call. Matches the design in `background-mechanism.md > Lifecycle` step 3.
+- [ ] `cmd/server/main.go` — pass derived options to `worker.New(...)` via `WithPollInterval` / `WithBatchSize`; remove hardcoded defaults from `New` once env is the single source of truth
+- [ ] **Job completion SLI plumbing** — covers schema, producer, worker, and metric in one consistent change:
+  - `migrations/` — add column `source TEXT NOT NULL` to `quote_jobs` (allowed values: `refresh`, `scheduler`); enforce via `CHECK`
+  - `internal/queue/` — `Job.Source` field on the type and on `Enqueue`; producer sets it (`refresh` in the `POST` handler, `scheduler` in `Tick`)
+  - `internal/obs/metrics.go` — register `quote_jobs_completion_seconds` histogram with label `source`; buckets `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (must include `REFRESH_MAX_LATENCY_SECONDS` exactly)
+  - `internal/worker/worker.go` — observe `Complete_at − created_at` on first successful `Complete` only; jobs with `attempts > 0` are NOT observed (they belong to job-success metrics)
+  - Acute alert `quote_jobs_completion_seconds{source="refresh"}` p99 > `REFRESH_MAX_LATENCY_SECONDS` for 10m lives in the alerting repo; multi-window burn-rate alerts also there — see `monitoring.md > Alerts (outline)` and `monitoring.md > SLO and SLI thinking > Job completion SLI`
+- [ ] `.env.example` and `README.md` — document `REFRESH_MAX_LATENCY_SECONDS`, note `pollInterval`/`batchSize` are derived
+
+---
+
 ## Stage 5 — Packaging and operability
 
 Run-from-zero story for reviewers and operators.
@@ -150,6 +168,14 @@ A standalone binary that imitates the apilayer-family (currencylayer). Lets revi
   - `queue-health.json` — pending count, throughput, attempts, scheduler/worker liveness
   - `upstream-health.json` — provider rate, latency, error breakdown, quota usage
 - [ ] Prometheus alert rules auto-provisioned from `deploy/prometheus/rules.yaml`, covering the alerts listed in `monitoring.md`
+
+### Latency SLA empirical validation
+
+With the fake provider's latency injection in place, the SLA from Stage 4.5 becomes testable end-to-end:
+
+- [ ] End-to-end timing tests covering the four cases: SLA on healthy upstream, SLA under injected jitter, SLA under transient errors (rescheduled jobs must be excluded from the SLI per `monitoring.md`), SLA under coalesced bursts (multiple `POST /quotes/refresh` in one bucket)
+- [ ] **Revisit response headers** for `POST /quotes/refresh` and `GET /quotes/:id`: based on the measured p99 from the previous item, decide whether `Retry-After`, `X-Refresh-Eta-Seconds`, or other latency hints add real value for clients. If yes, update `api/openapi.yaml` and `api-contract.md` in the same PR.
+- [ ] Replace the proposed per-tariff defaults in `capacity.md > Refresh latency SLA` with measured values, and remove the "default 5s" relaxation for Free/Basic if HTTP latency in practice does not differ from Pro+/Business
 
 ### Optional
 

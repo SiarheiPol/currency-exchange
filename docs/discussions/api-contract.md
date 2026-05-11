@@ -39,6 +39,14 @@ Response headers:
 
 The handler returns as soon as the job is durably enqueued. The actual fetch runs in a worker. `202 Accepted` is used because the request was accepted but the result resource is not yet final.
 
+**Latency contract.** For refresh-driven jobs on a healthy upstream, the p99 of the interval from accepted `POST /quotes/refresh` (the moment this handler returns `202`) to `GET /quotes/:id` reporting `status=done` is bounded by `REFRESH_MAX_LATENCY_SECONDS`. The default is 2s; per-deployment overrides and per-tariff guidance live in `capacity.md > Refresh latency SLA`. The SLI shape (target as p99, exclusions) is defined in `monitoring.md > SLO and SLI thinking`.
+
+Scope and exclusions:
+
+- Applies **only** to the refresh-driven path. Scheduler-driven cache freshness (when no client refreshes occur) has a separate target of `2 × T`, documented in `monitoring.md > SLO and SLI thinking > Freshness SLI`.
+- Jobs that enter retry/backoff because of transient upstream errors are excluded from this SLI — their behaviour is the concern of the job-success-rate metric, not job-latency.
+- Coalesced duplicates (a second `POST` arriving inside the same window as a first one) are counted **once**, against the first accepted request in their dedup window. The second response is effectively immediate — `Enqueue` returns the existing job id, and the underlying work is the same job already in flight.
+
 Behavior on repeated requests for the same `(base, quote)` pair (request coalescing within a window) is described in `idempotency.md`. From a caller's point of view, repeated requests in the same coalescing window receive the same `update_id` — no special handling required.
 
 ### `GET /quotes/:id`

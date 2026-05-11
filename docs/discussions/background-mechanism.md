@@ -324,7 +324,24 @@ This is the only restart-recovery we need. No special startup scan.
 
 ## Polling
 
-Default poll interval is 1 second. Good enough for our load. To lower pickup latency later, we can add `LISTEN/NOTIFY`: the producer runs `NOTIFY quote_jobs` after insert and workers wait on `LISTEN` instead of sleeping. The `JobQueue` interface does not change.
+`pollInterval` is **derived from `REFRESH_MAX_LATENCY_SECONDS`**, not a free parameter. The derivation and validation rules live in `capacity.md > Refresh latency SLA > Derived worker parameters`. With the default 2s SLA and apilayer-family p99 latency around 500ms, the resulting `pollInterval` lands at ~1s — small enough that pickup latency does not dominate the SLA budget, large enough that idle polling does not generate noticeable DB load.
+
+### When to introduce LISTEN/NOTIFY
+
+MVP stays on polling. NOTIFY is a known forward path, not a default — introduce it only when one of the concrete triggers below fires:
+
+| Trigger | Why polling stops working |
+|---|---|
+| `REFRESH_MAX_LATENCY_SECONDS < 1s` (typical Enterprise tier) | Polling under 500ms is unstable on Linux — scheduler jitter alone can blow the budget |
+| `WORKER_COUNT > ~8` on one instance | Concurrent `Reserve` calls start contending on the `jobs` table; NOTIFY routes work to one worker per signal |
+| Bursty producer pattern where tail latency on the busiest minute matters | Polling adds `pollInterval/2` average wait even on an otherwise empty queue |
+| Current MVP (2s SLA, K=1, 6 pairs, pollInterval ≈ 1s) | **Polling is sufficient.** Do not introduce NOTIFY. |
+
+When the trigger does fire: the producer runs `NOTIFY quote_jobs` after `Enqueue`, workers wait on `LISTEN` instead of sleeping, and `pollInterval` survives only as a safety net for missed notifications (typical value: 30s). The trade-off is one extra long-lived Postgres connection per listening process — it competes with the worker's other queries for `pgxpool` slots and counts against Postgres `max_connections`. The `JobQueue` interface does not change.
+
+### Distinguishing refresh-driven from scheduler-driven jobs
+
+The Job completion SLI in `monitoring.md > SLO and SLI thinking` applies **only** to refresh-driven jobs. The mechanism to tell them apart is a `source` field on each `Job`, set by the producer (`source='refresh'` in the `POST` handler, `source='scheduler'` in `Tick`). The field is persisted as a column on `quote_jobs` and propagated to the worker, which uses it as a label on `quote_jobs_completion_seconds`. The producer-side typing avoids reconstructing the origin from indirect signals (e.g., absence of `dedup_key` is **not** a reliable proxy — both producers compute one).
 
 ## Graceful shutdown
 
