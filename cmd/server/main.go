@@ -6,7 +6,10 @@
 //  3. Startup probe — apilayer.Provider.FetchPairs([{USD,EUR}]) sanity check.
 //  4. Worker — pgqueue + worker.Run in a goroutine, ctx cancelled on shutdown.
 //  5. Scheduler — scheduler.Run in a goroutine, ticks the queue from the whitelist.
-//  6. HTTP server — /healthz, /metrics, /readyz mounted; RequestID(PanicRecover(Metrics(mux))) chain.
+//  6. HTTP server — /healthz, /metrics, /readyz mounted; the handler chain is
+//     RequestID → PanicRecover → Metrics → mux. In dev/test profiles
+//     (cfg.Env != "production"), an OpenAPIValidate middleware wraps the mux
+//     to enforce request/response schema compliance at runtime.
 //
 // Shutdown order on SIGINT/SIGTERM:
 //
@@ -87,7 +90,7 @@ func run() error {
 	if err := pool.Ping(rootCtx); err != nil {
 		return fmt.Errorf("postgres ping: %w", err)
 	}
-	obs.Logger(rootCtx).Info("postgres connected")
+	obs.Logger(rootCtx).Info(obs.EvPostgresConnected)
 
 	clk := clock.New()
 	q := pgqueue.New(pool, clk)
@@ -118,9 +121,9 @@ func run() error {
 				stop()
 			}
 		}()
-		obs.Logger(workerCtx).Info("worker starting")
+		obs.Logger(workerCtx).Info(obs.EvWorkerStarted)
 		if err := w.Run(workerCtx); err != nil && !errors.Is(err, context.Canceled) {
-			obs.Logger(workerCtx).Error("worker exited unexpectedly", "error", err)
+			obs.Logger(workerCtx).Error(obs.EvWorkerExitedUnexpectedly, "error", err)
 			stop() // trigger graceful shutdown of the rest of the process
 		}
 	}()
@@ -186,7 +189,7 @@ func run() error {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		obs.Logger(rootCtx).Info("http server starting", "addr", cfg.HTTPAddr)
+		obs.Logger(rootCtx).Info(obs.EvHTTPServerStarted, "addr", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 			return
@@ -194,42 +197,70 @@ func run() error {
 		serverErr <- nil
 	}()
 
+	const shutdownTimeout = 10 * time.Second
+	shutdownCtx := context.WithoutCancel(rootCtx)
+
 	select {
 	case <-rootCtx.Done():
-		obs.Logger(context.Background()).Info("shutdown signal received")
+		obs.Logger(shutdownCtx).Info(obs.EvShutdownSignalReceived)
 	case err := <-serverErr:
-		schedCancel()
-		<-schedDone
-		workerCancel()
-		<-workerDone
+		if gsErr := gracefulShutdown(shutdownCtx, srv, schedCancel, schedDone, workerCancel, workerDone, shutdownTimeout); gsErr != nil {
+			obs.Logger(shutdownCtx).Error(obs.EvHTTPShutdownFailed, "error", gsErr)
+		}
 		return fmt.Errorf("http server: %w", err)
 	}
 
+	// Signal branch: HTTP server is still up; drain it then drain scheduler and worker.
+	if err := gracefulShutdown(shutdownCtx, srv, schedCancel, schedDone, workerCancel, workerDone, shutdownTimeout); err != nil {
+		obs.Logger(shutdownCtx).Error(obs.EvHTTPShutdownFailed, "error", err)
+	}
+
+	// pool.Close runs via defer on return.
+	return nil
+}
+
+// gracefulShutdown drains the running server in HTTP → scheduler → worker
+// order. Each stage is bounded by the supplied timeout; if a stage exceeds
+// it, the helper logs a warning via obs.Logger(ctx) and proceeds rather
+// than hanging the process.
+//
+// The ctx parameter should be derived from rootCtx via context.WithoutCancel
+// so log calls retain context values (request_id, logger) even though rootCtx
+// is already canceled at shutdown time.
+func gracefulShutdown(
+	ctx context.Context,
+	srv *http.Server,
+	schedCancel context.CancelFunc,
+	schedDone <-chan struct{},
+	workerCancel context.CancelFunc,
+	workerDone <-chan struct{},
+	timeout time.Duration,
+) error {
 	// 1. Stop accepting new HTTP requests; let in-flight ones drain.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	var firstErr error
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		obs.Logger(context.Background()).Error("http shutdown failed", "error", err)
+		firstErr = err
 	}
 
 	// 2. Stop the scheduler and wait for it to drain.
 	schedCancel()
 	select {
 	case <-schedDone:
-	case <-time.After(10 * time.Second):
-		obs.Logger(context.Background()).Warn(obs.EvSchedulerStopTimeout)
+	case <-time.After(timeout):
+		obs.Logger(ctx).Warn(obs.EvSchedulerStopTimeout)
 	}
 
 	// 3. Stop the worker and wait for it to drain.
 	workerCancel()
 	select {
 	case <-workerDone:
-	case <-time.After(10 * time.Second):
-		obs.Logger(context.Background()).Warn("worker did not stop within 10s")
+	case <-time.After(timeout):
+		obs.Logger(ctx).Warn(obs.EvWorkerStopTimeout)
 	}
 
-	// 4. pool.Close runs via defer on return.
-	return nil
+	return firstErr
 }
 
 func envOr(key, def string) string {

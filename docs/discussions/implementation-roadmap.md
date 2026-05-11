@@ -116,7 +116,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] `kin-openapi` runtime validation middleware in dev/test profiles only
 - [ ] Handler tests covering the full edge case matrix from `api-contract.md`
 - [x] Swagger UI at `/docs/`, raw spec at `/openapi.json` (both embedded)
-- [ ] `cmd/server` cleanup: replace raw log-message literals with `Ev*` constants; use `context.WithoutCancel` in shutdown log calls; extract `gracefulShutdown` helper with uniform timeouts; fix stale package doc comment
+- [x] `cmd/server` cleanup: replace raw log-message literals with `Ev*` constants; use `context.WithoutCancel` in shutdown log calls; extract `gracefulShutdown` helper with uniform timeouts; fix stale package doc comment
 - [ ] Worker outcome relabel: replace `outcome="ok"` with `outcome="idle"/"work"` on poll branch per `capacity.md`
 
 ---

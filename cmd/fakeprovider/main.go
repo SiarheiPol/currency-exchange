@@ -57,7 +57,7 @@ func run() error {
 
 	select {
 	case <-rootCtx.Done():
-		obs.Logger(context.Background()).Info(obs.EvFakeproviderShutdown)
+		obs.Logger(context.WithoutCancel(rootCtx)).Info(obs.EvShutdownSignalReceived)
 	case err := <-serverErr:
 		return fmt.Errorf("http server: %w", err)
 	}
