@@ -24,4 +24,6 @@ const (
 	EvFakeproviderStarted         = "fakeprovider starting"
 	EvFakeproviderShutdown        = "shutdown signal received"
 	EvPanicRecovered              = "panic recovered"
+	EvOpenAPIResponseInvalid      = "openapi response invalid"
+	EvOpenAPIValidateEnabled      = "openapi validate middleware enabled"
 )

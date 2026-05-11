@@ -17,6 +17,9 @@ type Config struct {
 	WhitelistCurrencies   []string
 	SchedulerTickInterval time.Duration
 	CoalescingWindow      time.Duration
+	// Env is the runtime profile. Set to "production" to disable the
+	// kin-openapi request/response validation middleware. Default: "development".
+	Env string
 }
 
 const defaultProviderBaseURL = "https://api.currencylayer.com"
@@ -34,6 +37,7 @@ func Load() (*Config, error) {
 		DBDSN:           os.Getenv("DB_DSN"),
 		ProviderAPIKey:  os.Getenv("PROVIDER_API_KEY"),
 		ProviderBaseURL: envOr("PROVIDER_BASE_URL", defaultProviderBaseURL),
+		Env:             envOr("APP_ENV", "development"),
 	}
 	if cfg.DBDSN == "" {
 		return nil, errors.New("DB_DSN environment variable is required")

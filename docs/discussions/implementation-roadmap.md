@@ -113,7 +113,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /quotes/latest?base=BASE&quote=QUOTE` (`max-age=W`)
 - [ ] Conditional GET handling (`If-None-Match` → `304`)
 - [x] Error envelope with stable `code` field
-- [ ] `kin-openapi` runtime validation middleware in dev/test profiles only
+- [x] `kin-openapi` runtime validation middleware in dev/test profiles only
 - [ ] Handler tests covering the full edge case matrix from `api-contract.md`
 - [ ] Swagger UI at `/docs/`, raw spec at `/openapi.yaml` (both embedded)
 

@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"currency-exchange/internal/api"
@@ -62,6 +63,16 @@ func run() error {
 	cfg, err := Load()
 	if err != nil {
 		return err
+	}
+
+	// Load the embedded OpenAPI spec early so startup fails fast before any
+	// goroutines are launched. Only used when Env != "production".
+	var openAPISpec *openapi3.T
+	if cfg.Env != "production" {
+		openAPISpec, err = api.GetSpec()
+		if err != nil {
+			return fmt.Errorf("load embedded openapi spec: %w", err)
+		}
 	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -158,9 +169,16 @@ func run() error {
 		ErrorHandlerFunc: api.JSONErrorHandler,
 	})
 
+	// Wire OpenAPI runtime validation middleware (dev/test only).
+	var inner http.Handler = mux
+	if openAPISpec != nil {
+		inner = httpmw.OpenAPIValidate(openAPISpec, mux)
+		obs.Logger(rootCtx).Info(obs.EvOpenAPIValidateEnabled, "env", cfg.Env)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpmw.RequestID(httpmw.PanicRecover(httpmw.Metrics(mux))),
+		Handler:           httpmw.RequestID(httpmw.PanicRecover(httpmw.Metrics(inner))),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
