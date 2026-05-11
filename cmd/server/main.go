@@ -29,6 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"currency-exchange/internal/api"
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/health"
 	"currency-exchange/internal/httpmw"
@@ -150,6 +151,9 @@ func run() error {
 			health.SchedulerChecker(sched, schedHeartbeatThreshold),
 		},
 	))
+
+	handlers := api.NewHandlers()
+	api.HandlerFromMux(handlers, mux)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
