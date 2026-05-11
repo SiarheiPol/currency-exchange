@@ -111,7 +111,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] Handler implementations satisfying generated `ServerInterface`
 - [x] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`
 - [x] Denormalize completed quote (`price`, `quote_updated_at`) into `quote_jobs`; `JobQueue.Complete` signature carries the snapshot so `GET /quotes/:id` for `done` jobs is genuinely immutable — see `background-mechanism.md > quote_jobs` and the `done_has_quote` invariant
-- [ ] Drop `attempts` field from `JobStatusPending` and `JobStatusFailed` response bodies — internal retry counter, not actionable for clients (see `api-contract.md > GET /quotes/:id`)
+- [x] Drop `attempts` field from `JobStatusPending` and `JobStatusFailed` response bodies — internal retry counter, not actionable for clients (see `api-contract.md > GET /quotes/:id`)
 - [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /quotes/latest?base=BASE&quote=QUOTE` (`max-age=W`)
 - [ ] Conditional GET handling (`If-None-Match` → `304`)
 - [x] Error envelope with stable `code` field

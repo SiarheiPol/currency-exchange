@@ -332,7 +332,6 @@ func TestHandlers_GetQuoteJob_ReturnsStubJobStatus(t *testing.T) {
 		"JobStatusPending.Status must be \"pending\"")
 	assert.Equal(t, "EUR", pending.Base, "JobStatusPending.Base must be EUR")
 	assert.Equal(t, "MXN", pending.Quote, "JobStatusPending.Quote must be MXN")
-	assert.Equal(t, 0, pending.Attempts, "JobStatusPending.Attempts must be 0")
 
 	wantID, err := uuid.Parse(pathUUIDStr)
 	require.NoError(t, err, "test UUID must parse cleanly")

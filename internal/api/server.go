@@ -140,7 +140,6 @@ func (h *Handlers) GetQuoteJob(w http.ResponseWriter, r *http.Request, id openap
 		Quote:     "MXN",
 		Status:    Pending,
 		CreatedAt: time.Now(),
-		Attempts:  0,
 	}
 	var js JobStatus
 	if err := js.FromJobStatusPending(pending); err != nil {

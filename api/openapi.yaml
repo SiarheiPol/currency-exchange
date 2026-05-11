@@ -309,7 +309,6 @@ components:
         - quote
         - status
         - created_at
-        - attempts
       properties:
         id:
           type: string
@@ -325,9 +324,6 @@ components:
         created_at:
           type: string
           format: date-time
-        attempts:
-          type: integer
-          minimum: 0
 
     JobStatusDone:
       type: object
@@ -374,7 +370,6 @@ components:
         - status
         - created_at
         - completed_at
-        - attempts
         - error
       properties:
         id:
@@ -394,9 +389,6 @@ components:
         completed_at:
           type: string
           format: date-time
-        attempts:
-          type: integer
-          minimum: 0
         error:
           type: object
           required:

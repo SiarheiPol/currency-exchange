@@ -132,7 +132,6 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 		want := api.JobStatusPending{
 			Base:      "USD",
 			Quote:     "EUR",
-			Attempts:  1,
 			CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		}
 		var union api.JobStatus
@@ -143,7 +142,7 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AsJobStatusPending: %v", err)
 		}
-		if got.Base != want.Base || got.Quote != want.Quote || got.Attempts != want.Attempts {
+		if got.Base != want.Base || got.Quote != want.Quote {
 			t.Errorf("pending round-trip mismatch: got %+v, want %+v", got, want)
 		}
 		// FromJobStatusPending forces Status = "pending".
@@ -178,9 +177,8 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 	t.Run("FailedRoundTrip", func(t *testing.T) {
 		t.Parallel()
 		want := api.JobStatusFailed{
-			Base:     "USD",
-			Quote:    "EUR",
-			Attempts: 3,
+			Base:  "USD",
+			Quote: "EUR",
 		}
 		var union api.JobStatus
 		if err := union.FromJobStatusFailed(want); err != nil {
@@ -190,7 +188,7 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AsJobStatusFailed: %v", err)
 		}
-		if got.Base != want.Base || got.Quote != want.Quote || got.Attempts != want.Attempts {
+		if got.Base != want.Base || got.Quote != want.Quote {
 			t.Errorf("failed round-trip mismatch: got %+v, want %+v", got, want)
 		}
 		if got.Status != "failed" {
