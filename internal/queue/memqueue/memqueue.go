@@ -34,6 +34,7 @@ type record struct {
 	job        queue.Job
 	status     status
 	leaseUntil time.Time
+	createdAt  time.Time
 }
 
 var _ queue.JobQueue = (*Queue)(nil)
@@ -49,8 +50,13 @@ func New(c clock.Clock) *Queue {
 }
 
 // Enqueue inserts j or, if a job with the same DedupKey already exists,
-// returns its id with inserted=false.
+// returns its id with inserted=false. Returns ErrInvalidSource if j.Source is
+// not "refresh" or "scheduler".
 func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, error) {
+	if j.Source != "refresh" && j.Source != "scheduler" {
+		return "", false, queue.ErrInvalidSource
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -62,9 +68,11 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 		}
 	}
 
+	now := q.clock.Now()
 	q.jobs[j.ID] = &record{
-		job:    j,
-		status: statusPending,
+		job:       j,
+		status:    statusPending,
+		createdAt: now,
 	}
 	if j.DedupKey != "" {
 		q.dedup[j.DedupKey] = j.ID
@@ -102,7 +110,10 @@ func (q *Queue) Reserve(_ context.Context, n int, lease time.Duration) ([]queue.
 	for _, r := range eligible {
 		r.status = statusRunning
 		r.leaseUntil = now.Add(lease)
-		result = append(result, r.job)
+		// Return a copy of the job with queue-owned fields populated.
+		j := r.job
+		j.CreatedAt = r.createdAt
+		result = append(result, j)
 	}
 	return result, nil
 }

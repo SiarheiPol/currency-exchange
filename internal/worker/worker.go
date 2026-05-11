@@ -176,6 +176,16 @@ func (w *Worker) dispatchBatch(ctx context.Context, jobs []queue.Job, startedAt 
 				obs.LogJobCompleted(ctx, string(job.ID), job.Base, job.Quote, time.Since(startedAt))
 				obs.QuoteJobsTotal.WithLabelValues("done").Inc()
 				obs.QuoteJobsAttempts.Observe(float64(attempts))
+				// Observe end-to-end SLI latency only for jobs completing on their
+				// first attempt (Attempts==0 is the pre-increment value returned by
+				// Reserve). Retried jobs (Attempts>0) skew the SLI distribution
+				// because their created_at reflects the original enqueue, not the
+				// current dispatch cycle; per contract Flag 3.
+				if job.Attempts == 0 {
+					obs.QuoteJobsCompletionSeconds.WithLabelValues(job.Source).Observe(
+						w.clk.Now().Sub(job.CreatedAt).Seconds(),
+					)
+				}
 			}
 		} else {
 			// pair is in res.Missing (or absent from both — defensive): permanent fail.

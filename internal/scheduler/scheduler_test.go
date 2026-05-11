@@ -236,6 +236,34 @@ func TestScheduler_Run_ReturnsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestScheduler_Tick_SetsSourceScheduler(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	gen := idgen.NewSeq()
+
+	onePair := []ratesprovider.Pair{{Base: "USD", Quote: "EUR"}}
+
+	s := scheduler.New(
+		scheduler.WithInterval(10*time.Minute),
+		scheduler.WithBucketSize(5*time.Minute),
+		scheduler.WithPairs(onePair),
+		scheduler.WithQueue(q),
+		scheduler.WithClock(clk),
+		scheduler.WithIDGen(gen),
+	)
+
+	ctx := context.Background()
+	require.NoError(t, s.Tick(ctx))
+
+	jobs := reserveAll(t, q)
+	require.Len(t, jobs, 1, "Tick must enqueue exactly one job for one pair")
+	require.Equal(t, "scheduler", jobs[0].Source,
+		"job enqueued by Tick must have Source=%q, got %q", "scheduler", jobs[0].Source)
+}
+
 // TestScheduler_LastTick_AdvancesAfterEachTick asserts that LastTick is zero
 // before any tick and equals the fake clock's time after each Tick call.
 func TestScheduler_LastTick_AdvancesAfterEachTick(t *testing.T) {

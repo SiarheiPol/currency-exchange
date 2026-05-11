@@ -115,3 +115,18 @@ func TestNewRegistry_LabelNames(t *testing.T) {
 		})
 	}
 }
+
+func TestAllMetricNames_ContainsQuoteJobsCompletionSeconds(t *testing.T) {
+	t.Parallel()
+
+	found := false
+	for _, name := range obs.AllMetricNames {
+		if name == obs.MetricQuoteJobsCompletionSeconds {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found,
+		"AllMetricNames must contain MetricQuoteJobsCompletionSeconds (%q)",
+		obs.MetricQuoteJobsCompletionSeconds)
+}

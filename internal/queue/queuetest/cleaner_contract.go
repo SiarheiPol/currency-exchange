@@ -39,6 +39,7 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 			Base:      "EUR",
 			Quote:     "USD",
 			NextRunAt: base,
+			Source:    "scheduler",
 		}
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
@@ -75,6 +76,7 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 			Base:      "USD",
 			Quote:     "MXN",
 			NextRunAt: base,
+			Source:    "scheduler",
 		}
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
@@ -108,6 +110,7 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 				Base:      "GBP",
 				Quote:     "EUR",
 				NextRunAt: base,
+				Source:    "scheduler",
 			}
 			_, _, err := q.Enqueue(ctx, job)
 			require.NoError(t, err)
@@ -139,6 +142,7 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 			Base:      "CAD",
 			Quote:     "USD",
 			NextRunAt: base,
+			Source:    "scheduler",
 		}
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)
@@ -175,6 +179,7 @@ func RunCleanerContractTests(t *testing.T, factory CleanerFactory) {
 			Base:      "CHF",
 			Quote:     "EUR",
 			NextRunAt: base,
+			Source:    "scheduler",
 		}
 		_, _, err := q.Enqueue(ctx, job)
 		require.NoError(t, err)

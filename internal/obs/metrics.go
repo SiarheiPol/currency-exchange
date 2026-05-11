@@ -58,6 +58,11 @@ const (
 	// MetricRatesProviderResponseAnomaliesTotal counts response anomalies in
 	// upstream rates provider responses, partitioned by provider and anomaly kind.
 	MetricRatesProviderResponseAnomaliesTotal = "rates_provider_response_anomalies_total"
+
+	// MetricQuoteJobsCompletionSeconds measures the end-to-end latency from job
+	// creation (created_at) to first successful completion, partitioned by source.
+	// Only jobs that complete on their first attempt (Attempts==0) are observed.
+	MetricQuoteJobsCompletionSeconds = "quote_jobs_completion_seconds"
 )
 
 // AllMetricNames is the canonical enumeration of every Prometheus metric name
@@ -78,6 +83,7 @@ var AllMetricNames = []string{
 	MetricRatesProviderRequestDurationSeconds,
 	MetricRatesProviderQuotaUsed,
 	MetricRatesProviderResponseAnomaliesTotal,
+	MetricQuoteJobsCompletionSeconds,
 }
 
 // HTTPRequestsTotal counts HTTP requests partitioned by method, path, and
@@ -131,6 +137,11 @@ var RatesProviderQuotaUsed *prometheus.GaugeVec
 // RatesProviderResponseAnomaliesTotal counts response anomalies in upstream
 // rates provider responses partitioned by provider and anomaly kind.
 var RatesProviderResponseAnomaliesTotal *prometheus.CounterVec
+
+// QuoteJobsCompletionSeconds measures end-to-end job completion latency in
+// seconds from created_at to first successful Complete, partitioned by source.
+// Only jobs with Attempts==0 at the moment Complete succeeds are observed.
+var QuoteJobsCompletionSeconds *prometheus.HistogramVec
 
 // defaultRegistry is the package-level singleton registry. It is created once
 // in init and returned by every NewRegistry call.
@@ -222,6 +233,15 @@ func init() {
 	}, []string{"provider", "kind"})
 	RatesProviderResponseAnomaliesTotal.WithLabelValues("", "")
 
+	QuoteJobsCompletionSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    MetricQuoteJobsCompletionSeconds,
+		Help:    "End-to-end job completion latency in seconds from created_at to first successful Complete, partitioned by source.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
+	}, []string{"source"})
+	// Pre-initialise so Gather returns the family before any real observations.
+	QuoteJobsCompletionSeconds.WithLabelValues("scheduler").Observe(0)
+	QuoteJobsCompletionSeconds.WithLabelValues("refresh").Observe(0)
+
 	defaultRegistry.MustRegister(
 		HTTPRequestsTotal,
 		HTTPRequestDurationSeconds,
@@ -237,10 +257,11 @@ func init() {
 		RatesProviderRequestDurationSeconds,
 		RatesProviderQuotaUsed,
 		RatesProviderResponseAnomaliesTotal,
+		QuoteJobsCompletionSeconds,
 	)
 }
 
-// NewRegistry returns the package-level singleton *prometheus.Registry. All 14
+// NewRegistry returns the package-level singleton *prometheus.Registry. All 15
 // service collectors are pre-registered and pre-initialised. Callers must not
 // register additional collectors into this registry; use the exported package
 // variables (e.g. obs.HTTPRequestsTotal) to record observations.

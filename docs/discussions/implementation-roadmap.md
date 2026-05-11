@@ -129,7 +129,7 @@ Closes the implementation gap exposed when documenting `REFRESH_MAX_LATENCY_MS` 
 - [x] `cmd/server/config.go` — derive `pollInterval` and `batchSize` from the SLA + whitelist + `WORKER_COUNT`; log the effective values at startup (`derived worker.poll_interval=…, batch_size=…`)
 - [x] `internal/worker/worker.go` — in the `Reserve` loop, **group reserved jobs by `Base`** before calling `FetchPairs`, then dispatch per-pair results from the batched response. Replaces the current per-job slice-of-one call. Matches the design in `background-mechanism.md > Lifecycle` step 3.
 - [x] `cmd/server/main.go` — pass derived options to `worker.New(...)` via `WithPollInterval` / `WithBatchSize`; remove hardcoded defaults from `New` once env is the single source of truth
-- [ ] **Job completion SLI plumbing** — covers schema, producer, worker, and metric in one consistent change:
+- [x] **Job completion SLI plumbing** — covers schema, producer, worker, and metric in one consistent change:
   - `migrations/` — add column `source TEXT NOT NULL` to `quote_jobs` (allowed values: `refresh`, `scheduler`); enforce via `CHECK`
   - `internal/queue/` — `Job.Source` field on the type and on `Enqueue`; producer sets it (`refresh` in the `POST` handler, `scheduler` in `Tick`)
   - `internal/obs/metrics.go` — register `quote_jobs_completion_seconds` histogram with label `source`; buckets `[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]` (must include `REFRESH_MAX_LATENCY_MS / 1000` exactly as a bucket boundary; the default `2000ms → 2s` is already in the suggested set)

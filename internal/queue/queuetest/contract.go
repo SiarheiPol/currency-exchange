@@ -25,6 +25,8 @@ type QueueFactory func(t *testing.T, clk clock.Clock) queue.JobQueue
 
 // newJob builds a queue.Job whose ID is drawn from idg and whose Base, Quote
 // and DedupKey are set to the supplied values. NextRunAt is set to clk.Now().
+// Source is set to "scheduler" (the default for contract tests that do not
+// exercise source-specific behaviour).
 func newJob(clk clock.Clock, idg idgen.IDGenerator, base, quote, dedupKey string) queue.Job {
 	return queue.Job{
 		ID:        queue.JobID(idg.NewID()),
@@ -32,6 +34,7 @@ func newJob(clk clock.Clock, idg idgen.IDGenerator, base, quote, dedupKey string
 		Quote:     quote,
 		DedupKey:  dedupKey,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	}
 }
 
@@ -148,6 +151,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			Quote:     "USD",
 			DedupKey:  "a",
 			NextRunAt: base.Add(10 * time.Second),
+			Source:    "scheduler",
 		}
 		jobB := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
@@ -155,6 +159,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			Quote:     "MXN",
 			DedupKey:  "b",
 			NextRunAt: base.Add(5 * time.Second),
+			Source:    "scheduler",
 		}
 		jobC := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
@@ -162,6 +167,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			Quote:     "EUR",
 			DedupKey:  "c",
 			NextRunAt: base.Add(20 * time.Second),
+			Source:    "scheduler",
 		}
 
 		_, _, err := q.Enqueue(ctx, jobA)
@@ -236,6 +242,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			Quote:     "USD",
 			DedupKey:  "future",
 			NextRunAt: base.Add(1 * time.Second),
+			Source:    "scheduler",
 		}
 		past := queue.Job{
 			ID:        queue.JobID(idg.NewID()),
@@ -243,6 +250,7 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 			Quote:     "MXN",
 			DedupKey:  "past",
 			NextRunAt: base.Add(-1 * time.Second),
+			Source:    "scheduler",
 		}
 
 		_, _, err := q.Enqueue(ctx, future)
@@ -536,6 +544,130 @@ func RunJobQueueContractTests(t *testing.T, factory QueueFactory) {
 		id3 := enqueueAndGet()
 		err = q.Fail(ctx, id3, "r")
 		assert.True(t, errors.Is(err, queue.ErrNotReserved), "Fail: want ErrNotReserved, got %v", err)
+	})
+
+	// --- Source field ---
+
+	t.Run("Source/RefreshRoundTrips", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := queue.Job{
+			ID:        queue.JobID(idg.NewID()),
+			Base:      "EUR",
+			Quote:     "USD",
+			DedupKey:  "src-refresh",
+			NextRunAt: clk.Now(),
+			Source:    "refresh",
+		}
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		reserved, err := q.Reserve(ctx, 1, 30*time.Second)
+		require.NoError(t, err)
+		require.Len(t, reserved, 1)
+		assert.Equal(t, "refresh", reserved[0].Source)
+	})
+
+	t.Run("Source/SchedulerRoundTrips", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := queue.Job{
+			ID:        queue.JobID(idg.NewID()),
+			Base:      "USD",
+			Quote:     "MXN",
+			DedupKey:  "src-scheduler",
+			NextRunAt: clk.Now(),
+			Source:    "scheduler",
+		}
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		reserved, err := q.Reserve(ctx, 1, 30*time.Second)
+		require.NoError(t, err)
+		require.Len(t, reserved, 1)
+		assert.Equal(t, "scheduler", reserved[0].Source)
+	})
+
+	t.Run("Source/CreatedAtReflectsEnqueueTime", func(t *testing.T) {
+		t.Parallel()
+		t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		clk := clock.NewFake(t0)
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := queue.Job{
+			ID:        queue.JobID(idg.NewID()),
+			Base:      "EUR",
+			Quote:     "MXN",
+			DedupKey:  "cat-t2",
+			NextRunAt: clk.Now(),
+			Source:    "scheduler",
+		}
+		_, _, err := q.Enqueue(ctx, job)
+		require.NoError(t, err)
+
+		// Advance 5s so reserve-time differs from enqueue-time.
+		clk.Advance(5 * time.Second)
+
+		reserved, err := q.Reserve(ctx, 1, 30*time.Second)
+		require.NoError(t, err)
+		require.Len(t, reserved, 1)
+		assert.True(t, reserved[0].CreatedAt.Equal(t0),
+			"CreatedAt must equal enqueue time %v, got %v", t0, reserved[0].CreatedAt)
+	})
+
+	t.Run("Source/EmptySourceReturnsErrInvalidSource", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := queue.Job{
+			ID:        queue.JobID(idg.NewID()),
+			Base:      "EUR",
+			Quote:     "USD",
+			DedupKey:  "empty-src",
+			NextRunAt: clk.Now(),
+			Source:    "", // empty — must be rejected
+		}
+		_, _, err := q.Enqueue(ctx, job)
+		assert.True(t, errors.Is(err, queue.ErrInvalidSource),
+			"expected ErrInvalidSource for empty Source, got %v", err)
+
+		// No row persisted: Reserve must return nothing.
+		reserved, rErr := q.Reserve(ctx, 1, 30*time.Second)
+		require.NoError(t, rErr)
+		assert.Empty(t, reserved, "no job must be reserved after rejected Enqueue")
+	})
+
+	t.Run("Source/InvalidSourceReturnsErrInvalidSource", func(t *testing.T) {
+		t.Parallel()
+		clk := clock.NewFake(time.Now())
+		q := factory(t, clk)
+		idg := idgen.NewSeq()
+		ctx := context.Background()
+
+		job := queue.Job{
+			ID:        queue.JobID(idg.NewID()),
+			Base:      "USD",
+			Quote:     "EUR",
+			DedupKey:  "invalid-src",
+			NextRunAt: clk.Now(),
+			Source:    "unknown", // invalid value
+		}
+		_, _, err := q.Enqueue(ctx, job)
+		assert.True(t, errors.Is(err, queue.ErrInvalidSource),
+			"expected ErrInvalidSource for Source=%q, got %v", "unknown", err)
 	})
 
 	// --- Concurrency ---

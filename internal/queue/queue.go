@@ -33,6 +33,16 @@ type Job struct {
 	Attempts int
 	// NextRunAt is the earliest time the job is eligible to be reserved.
 	NextRunAt time.Time
+	// Source identifies the producer that enqueued the job. Valid values are
+	// "refresh" (enqueued by the POST /quotes/refresh handler) and "scheduler"
+	// (enqueued by the background scheduler). Producers must set this field
+	// before calling Enqueue; queue implementations enforce the constraint and
+	// return ErrInvalidSource for any other value.
+	Source string
+	// CreatedAt is the time the job was inserted into the queue. Set by the
+	// queue implementation at Enqueue time; producers must not set it.
+	// Populated by Reserve so the worker can compute end-to-end SLI latency.
+	CreatedAt time.Time
 }
 
 // JobQueue is the seam between producers (refresh handler, scheduler) and the
@@ -77,3 +87,8 @@ var ErrNotFound = errors.New("job not found")
 // exists but is not currently in the running state (e.g., pending, done, or
 // failed). Callers test with errors.Is(err, queue.ErrNotReserved).
 var ErrNotReserved = errors.New("job not in running state")
+
+// ErrInvalidSource is returned by Enqueue when the job's Source field is not
+// one of the accepted values ("refresh" or "scheduler"). Queue implementations
+// check this before touching storage so the DB CHECK constraint is defense-in-depth.
+var ErrInvalidSource = errors.New("invalid job source")

@@ -20,6 +20,8 @@ import (
 var _ queue.JobQueue = (*memqueue.Queue)(nil)
 
 // makeJob constructs a queue.Job using the provided sequential ID generator.
+// Source is set to "scheduler" as the default for tests not exercising
+// source-specific behaviour.
 func makeJob(ids *idgen.SeqIDGenerator, base, quote, dedupKey string, runAt time.Time) queue.Job {
 	return queue.Job{
 		ID:        queue.JobID(ids.NewID()),
@@ -27,6 +29,7 @@ func makeJob(ids *idgen.SeqIDGenerator, base, quote, dedupKey string, runAt time
 		Quote:     quote,
 		DedupKey:  dedupKey,
 		NextRunAt: runAt,
+		Source:    "scheduler",
 	}
 }
 

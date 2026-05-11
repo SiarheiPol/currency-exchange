@@ -94,6 +94,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 			Quote:     p.Quote,
 			DedupKey:  dedup,
 			NextRunAt: now,
+			Source:    "scheduler",
 		}
 		if _, _, err := s.queue.Enqueue(ctx, job); err != nil {
 			return err

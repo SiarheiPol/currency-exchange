@@ -41,6 +41,7 @@ func TestEnqueue_WritesAllColumns(t *testing.T) {
 		DedupKey:  "test-dedup-key",
 		NextRunAt: knownTime.Add(5 * time.Minute),
 		Attempts:  0,
+		Source:    "scheduler",
 	}
 
 	id, inserted, err := q.Enqueue(context.Background(), j)
@@ -119,6 +120,7 @@ func TestEnqueue_SelfPair_Rejected(t *testing.T) {
 		Quote:     "EUR",
 		DedupKey:  "",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	}
 
 	_, _, err := q.Enqueue(context.Background(), j)
@@ -151,6 +153,7 @@ func TestReserve_PopulatesBasePair(t *testing.T) {
 		Quote:     "JPY",
 		DedupKey:  "",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	}
 
 	_, inserted, err := q.Enqueue(context.Background(), j)
@@ -200,6 +203,7 @@ func TestEnqueue_CoalescingCounterIncrements(t *testing.T) {
 		Quote:     "USD",
 		DedupKey:  "k-coalesce",
 		NextRunAt: knownTime,
+		Source:    "scheduler",
 	}
 	j2 := queue.Job{
 		ID:        queue.JobID(idg.NewID()),
@@ -207,6 +211,7 @@ func TestEnqueue_CoalescingCounterIncrements(t *testing.T) {
 		Quote:     "USD",
 		DedupKey:  "k-coalesce",
 		NextRunAt: knownTime,
+		Source:    "scheduler",
 	}
 
 	_, _, err := q.Enqueue(ctx, j1)

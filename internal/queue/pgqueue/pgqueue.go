@@ -30,8 +30,13 @@ var _ queue.JobQueue = (*Queue)(nil)
 var _ queue.Cleaner = (*Queue)(nil)
 
 // Enqueue inserts j or, if a job with the same DedupKey already exists,
-// returns its id with inserted=false.
+// returns its id with inserted=false. Returns ErrInvalidSource if j.Source is
+// not "refresh" or "scheduler".
 func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, error) {
+	if j.Source != "refresh" && j.Source != "scheduler" {
+		return "", false, queue.ErrInvalidSource
+	}
+
 	now := q.clk.Now()
 
 	var dedupKey *string
@@ -44,16 +49,18 @@ func (q *Queue) Enqueue(ctx context.Context, j queue.Job) (queue.JobID, bool, er
 		INSERT INTO quote_jobs (
 			id, base, quote, status, attempts,
 			next_run_at, created_at, updated_at,
-			dedup_key, locked_by, lease_until, completed_at, last_error
+			dedup_key, locked_by, lease_until, completed_at, last_error,
+			source
 		) VALUES (
 			$1, $2, $3, 'pending', 0,
 			$4, $5, $5,
-			$6, NULL, NULL, NULL, NULL
+			$6, NULL, NULL, NULL, NULL,
+			$7
 		)
 		ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL
 		DO NOTHING
 		RETURNING id`,
-		string(j.ID), j.Base, j.Quote, j.NextRunAt, now, dedupKey,
+		string(j.ID), j.Base, j.Quote, j.NextRunAt, now, dedupKey, j.Source,
 	).Scan(&returnedID)
 
 	if err == nil {
@@ -98,7 +105,7 @@ func (q *Queue) Reserve(ctx context.Context, n int, lease time.Duration) ([]queu
 		       updated_at  = $1
 		FROM selected
 		WHERE quote_jobs.id = selected.id
-		RETURNING quote_jobs.id, quote_jobs.base, quote_jobs.quote, quote_jobs.attempts, quote_jobs.next_run_at`,
+		RETURNING quote_jobs.id, quote_jobs.base, quote_jobs.quote, quote_jobs.attempts, quote_jobs.next_run_at, quote_jobs.source, quote_jobs.created_at`,
 		now, n, now.Add(lease),
 	)
 	if err != nil {
@@ -110,7 +117,7 @@ func (q *Queue) Reserve(ctx context.Context, n int, lease time.Duration) ([]queu
 	for rows.Next() {
 		var j queue.Job
 		var id string
-		if err := rows.Scan(&id, &j.Base, &j.Quote, &j.Attempts, &j.NextRunAt); err != nil {
+		if err := rows.Scan(&id, &j.Base, &j.Quote, &j.Attempts, &j.NextRunAt, &j.Source, &j.CreatedAt); err != nil {
 			return nil, fmt.Errorf("pgqueue reserve: scan: %w", err)
 		}
 		j.ID = queue.JobID(id)

@@ -91,6 +91,7 @@ func TestWorker_ReservesAndCompletesJob(t *testing.T) {
 		Base:      "EUR",
 		Quote:     "MXN",
 		NextRunAt: clk.Now(), // already eligible
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
@@ -164,6 +165,7 @@ func TestWorker_InstrumentsLifecycle(t *testing.T) {
 		Base:      "EUR",
 		Quote:     "MXN",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
@@ -278,6 +280,7 @@ func TestWorker_DispatchesSuccessToUpsertAndComplete(t *testing.T) {
 		Base:      "EUR",
 		Quote:     "MXN",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -327,6 +330,7 @@ func TestWorker_DispatchesMissingToPermanentFail(t *testing.T) {
 		Quote:     "ZZZ",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -379,6 +383,7 @@ func TestWorker_DispatchesTransientErrorToReschedule(t *testing.T) {
 		Quote:     "MXN",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -429,6 +434,7 @@ func TestWorker_DispatchesPermanentErrorToImmediateFail(t *testing.T) {
 		Quote:     "MXN",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -478,6 +484,7 @@ func TestWorker_QuotaExceeded_ReschedulesPlusOneHour(t *testing.T) {
 		Quote:     "MXN",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -544,6 +551,7 @@ func TestWorker_SingleBaseBatch_OneFetchPairsCall(t *testing.T) {
 			Base:      "EUR",
 			Quote:     q2,
 			NextRunAt: clk.Now(),
+			Source:    "scheduler",
 		})
 	}
 
@@ -593,12 +601,14 @@ func TestWorker_MultiBaseBatch_OneFetchPairsCall(t *testing.T) {
 		Base:      "EUR",
 		Quote:     "MXN",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 	enqueueJob(t, q, queue.Job{
 		ID:        queue.JobID(gen.NewID()),
 		Base:      "USD",
 		Quote:     "EUR",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -655,18 +665,21 @@ func TestWorker_BatchDemux_MissingPairFails(t *testing.T) {
 		Base:      "EUR",
 		Quote:     "MXN",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 	enqueueJob(t, q, queue.Job{
 		ID:        queue.JobID(gen.NewID()),
 		Base:      "EUR",
 		Quote:     "USD",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 	enqueueJob(t, q, queue.Job{
 		ID:        queue.JobID(gen.NewID()),
 		Base:      "EUR",
 		Quote:     "GBP",
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -722,6 +735,7 @@ func TestWorker_BatchLevelTransientError_AllJobsRescheduled(t *testing.T) {
 		Quote:     "MXN",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 	enqueueJob(t, q, queue.Job{
 		ID:        queue.JobID(gen.NewID()),
@@ -729,6 +743,7 @@ func TestWorker_BatchLevelTransientError_AllJobsRescheduled(t *testing.T) {
 		Quote:     "EUR",
 		Attempts:  0,
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,
@@ -799,6 +814,166 @@ func TestWorkerNew_PanicWhenWithPollIntervalOmitted(t *testing.T) {
 		"panic message must name the missing WithPollInterval option")
 }
 
+// ---------------------------------------------------------------------------
+// Stage 4.5.c SLI plumbing tests
+// ---------------------------------------------------------------------------
+
+// gatherCompletionHist gathers the quote_jobs_completion_seconds histogram for
+// the given source label from the obs package-level singleton registry and
+// returns (SampleCount, SampleSum). Returns (0, 0) when no metric with that
+// label is found.
+//
+// We use Gather-based inspection (dto.Histogram) rather than
+// testutil.ToFloat64 because testutil.ToFloat64 panics on histogram metrics:
+// it only supports counter, gauge, and untyped types.
+func gatherCompletionHist(t *testing.T, source string) (count uint64, sum float64) {
+	t.Helper()
+	families, err := obs.NewRegistry().Gather()
+	require.NoError(t, err, "Gather must not return an error")
+	for _, fam := range families {
+		if fam.GetName() != obs.MetricQuoteJobsCompletionSeconds {
+			continue
+		}
+		for _, m := range fam.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "source" && lp.GetValue() == source {
+					h := m.GetHistogram()
+					return h.GetSampleCount(), h.GetSampleSum()
+				}
+			}
+		}
+	}
+	return 0, 0
+}
+
+// Reads obs.QuoteJobsCompletionSeconds (package singleton) via Gather, so
+// concurrent tests touching the same label value would produce
+// non-deterministic deltas — hence no t.Parallel here.
+func TestWorker_SLI_ObservesOnFirstAttempt(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	gen := idgen.NewSeq()
+	// Enqueue a fresh job with Attempts=0 and Source="scheduler".
+	// CreatedAt will be set by the queue at enqueue time (t0).
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		Attempts:  0,
+		NextRunAt: clk.Now(),
+		Source:    "scheduler",
+	})
+
+	w := worker.New(q, q, happyFake(clk), repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(1),
+	)
+
+	countBefore, _ := gatherCompletionHist(t, "scheduler")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	countAfter, _ := gatherCompletionHist(t, "scheduler")
+
+	require.Equal(t, countBefore+1, countAfter,
+		"QuoteJobsCompletionSeconds{source=scheduler} SampleCount must advance by 1 for a fresh job")
+}
+
+// Same package-singleton concurrency rationale as
+// TestWorker_SLI_ObservesOnFirstAttempt — no t.Parallel.
+func TestWorker_SLI_NoObservationOnRetry(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	gen := idgen.NewSeq()
+	// Enqueue a job pre-set with Attempts=1 (simulates a retried job).
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		Attempts:  1,
+		NextRunAt: clk.Now(),
+		Source:    "scheduler",
+	})
+
+	w := worker.New(q, q, happyFake(clk), repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(1),
+	)
+
+	countBefore, _ := gatherCompletionHist(t, "scheduler")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	countAfter, _ := gatherCompletionHist(t, "scheduler")
+
+	require.Equal(t, countBefore, countAfter,
+		"QuoteJobsCompletionSeconds SampleCount must NOT change for a retried job (Attempts=1)")
+}
+
+// Discriminates the observation seam: a dispatch-start-based implementation
+// would observe ~0s; a CreatedAt-based implementation must observe ~4s.
+// Same package-singleton concurrency rationale — no t.Parallel.
+func TestWorker_SLI_UsesCreatedAtNotDispatchTime(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(t0)
+	q := memqueue.New(clk)
+	repo := memquoterepo.New()
+
+	gen := idgen.NewSeq()
+	// Enqueue at T0 — queue sets CreatedAt = T0 (via clk.Now() at enqueue time).
+	enqueueJob(t, q, queue.Job{
+		ID:        queue.JobID(gen.NewID()),
+		Base:      "EUR",
+		Quote:     "MXN",
+		Attempts:  0,
+		NextRunAt: clk.Now(),
+		Source:    "scheduler",
+	})
+
+	// Advance to T0+4s before the worker starts. The fake provider returns
+	// immediately, so clk.Now() at observation time = T0+4s. The observation
+	// must therefore be clk.Now().Sub(job.CreatedAt) = 4s, not the near-zero
+	// dispatch-to-completion time that would result from using a dispatch timestamp.
+	clk.Advance(4 * time.Second) // clk is now T0+4s
+
+	w := worker.New(q, q, happyFake(clk), repo, clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithLeaseTime(1*time.Second),
+		worker.WithBatchSize(1),
+	)
+
+	// Capture SampleCount and SampleSum before the run so we can compute the
+	// delta regardless of earlier observations by other (non-parallel) tests.
+	_, sumBefore := gatherCompletionHist(t, "scheduler")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	_, sumAfter := gatherCompletionHist(t, "scheduler")
+
+	// sumAfter - sumBefore is the observed latency in seconds.
+	// job.CreatedAt = T0, clk.Now() at observation = T0+4s → delta = 4.0s.
+	// Tolerance ±0.5s confirms it is CreatedAt-based (4s) rather than
+	// dispatch-based (which would be near 0 since the clock was already at T0+4s
+	// before the worker started).
+	observed := sumAfter - sumBefore
+	require.InDelta(t, 4.0, observed, 0.5,
+		"observed SLI latency must be ≈4s (CreatedAt-to-completion), got %.3fs", observed)
+}
+
 // TestWorker_AttemptBudgetExhausted_TransientBecomesFail verifies that when a
 // job's Attempts count already equals the worker's maxAttempts, a transient
 // error causes the worker to permanently fail the job instead of rescheduling.
@@ -820,6 +995,7 @@ func TestWorker_AttemptBudgetExhausted_TransientBecomesFail(t *testing.T) {
 		Quote:     "MXN",
 		Attempts:  2, // already at the budget limit for WithMaxAttempts(2)
 		NextRunAt: clk.Now(),
+		Source:    "scheduler",
 	})
 
 	w := worker.New(q, q, provider, repo, clk,

@@ -84,6 +84,7 @@ func TestWorkerWiring_DerivedConfigReachesWorker(t *testing.T) {
 			Base:      p.Base,
 			Quote:     p.Quote,
 			NextRunAt: clk.Now(),
+			Source:    "scheduler",
 		})
 	}
 
