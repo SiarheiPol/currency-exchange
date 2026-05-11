@@ -86,9 +86,9 @@ func TestPanicRecover_LogsPanicViaTypedHelper(t *testing.T) {
 	panickyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("test-panic-value")
 	})
-	// Wire order: PanicRecover wraps RequestID wraps handler, so request_id is
+	// Wire order: RequestID wraps PanicRecover wraps handler, so request_id is
 	// in context when the panic fires.
-	chain := httpmw.PanicRecover(httpmw.RequestID(panickyHandler))
+	chain := httpmw.RequestID(httpmw.PanicRecover(panickyHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
 	// No X-Request-Id header — RequestID middleware generates one.

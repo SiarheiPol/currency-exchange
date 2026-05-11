@@ -6,7 +6,7 @@
 //  3. Startup probe — apilayer.Provider.FetchPairs([{USD,EUR}]) sanity check.
 //  4. Worker — pgqueue + worker.Run in a goroutine, ctx cancelled on shutdown.
 //  5. Scheduler — scheduler.Run in a goroutine, ticks the queue from the whitelist.
-//  6. HTTP server — /healthz, /metrics, /readyz mounted; RequestID middleware.
+//  6. HTTP server — /healthz, /metrics, /readyz mounted; RequestID(PanicRecover(Metrics(mux))) chain.
 //
 // Shutdown order on SIGINT/SIGTERM:
 //
@@ -153,7 +153,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpmw.PanicRecover(httpmw.RequestID(mux)),
+		Handler:           httpmw.RequestID(httpmw.PanicRecover(httpmw.Metrics(mux))),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
