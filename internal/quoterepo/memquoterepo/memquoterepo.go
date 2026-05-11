@@ -44,6 +44,18 @@ func (r *Repo) Get(p ratesprovider.Pair) (ratesprovider.Quote, bool) {
 	return q, ok
 }
 
+// GetLatest returns the stored quote for the given (base, quote) pair.
+// Returns quoterepo.ErrNoData if no row exists for the pair.
+func (r *Repo) GetLatest(_ context.Context, base, quote string) (ratesprovider.Quote, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	q, ok := r.quotes[ratesprovider.Pair{Base: base, Quote: quote}]
+	if !ok {
+		return ratesprovider.Quote{}, quoterepo.ErrNoData
+	}
+	return q, nil
+}
+
 // Len returns the number of quotes currently stored.
 func (r *Repo) Len() int {
 	r.mu.Lock()

@@ -4,9 +4,13 @@ package pgquoterepo
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"currency-exchange/internal/quoterepo"
 	"currency-exchange/internal/ratesprovider"
@@ -42,4 +46,31 @@ func (r *Repo) UpsertBatch(ctx context.Context, qs []ratesprovider.Quote) error 
 		}
 	}
 	return nil
+}
+
+// GetLatest returns the stored quote for the given (base, quote) pair.
+// Returns quoterepo.ErrNoData if no row exists; otherwise returns the stored
+// quote and nil.
+func (r *Repo) GetLatest(ctx context.Context, base, quote string) (ratesprovider.Quote, error) {
+	var priceStr string
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT price::text, updated_at FROM quotes WHERE base=$1 AND quote=$2`,
+		base, quote,
+	).Scan(&priceStr, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ratesprovider.Quote{}, quoterepo.ErrNoData
+	}
+	if err != nil {
+		return ratesprovider.Quote{}, fmt.Errorf("pgquoterepo get latest: %w", err)
+	}
+	price, err := decimal.NewFromString(priceStr)
+	if err != nil {
+		return ratesprovider.Quote{}, fmt.Errorf("pgquoterepo get latest: parse price: %w", err)
+	}
+	return ratesprovider.Quote{
+		Pair:      ratesprovider.Pair{Base: base, Quote: quote},
+		Price:     price,
+		FetchedAt: updatedAt,
+	}, nil
 }

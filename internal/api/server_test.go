@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,9 @@ import (
 	"currency-exchange/internal/obs"
 	"currency-exchange/internal/queue"
 	"currency-exchange/internal/queue/memqueue"
+	"currency-exchange/internal/quoterepo"
+	"currency-exchange/internal/quoterepo/memquoterepo"
+	"currency-exchange/internal/ratesprovider"
 )
 
 // Test 1 — compile-time interface check.
@@ -46,11 +50,11 @@ var testEpoch = time.Unix(1_700_000_000, 0).UTC()
 const testWindow = 30 * time.Second
 
 // newTestHandlerWithQueue builds the HandlerWithOptions chain using explicit
-// queue, clock, and idgen dependencies.
-func newTestHandlerWithQueue(t *testing.T, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator) http.Handler {
+// queue, clock, idgen, and repo dependencies.
+func newTestHandlerWithQueue(t *testing.T, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator, repo quoterepo.QuoteRepo) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers(testWhitelist, q, clk, ig, testWindow)
+	handlers := api.NewHandlers(testWhitelist, q, clk, ig, testWindow, repo)
 	return api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: api.JSONErrorHandler,
@@ -64,7 +68,7 @@ func newTestHandler(t *testing.T) http.Handler {
 	clk := clock.NewFake(testEpoch)
 	q := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	return newTestHandlerWithQueue(t, q, clk, ig)
+	return newTestHandlerWithQueue(t, q, clk, ig, memquoterepo.New())
 }
 
 // fakeErrQueue is a stub of queue.JobQueue whose Enqueue and GetByID always
@@ -97,7 +101,7 @@ func TestHandlers_RefreshQuote_EnqueuesAndReturnsQueueID(t *testing.T) {
 	clk := clock.NewFake(testEpoch)
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, mq, clk, ig)
+	h := newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New())
 
 	body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
 	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
@@ -144,7 +148,7 @@ func TestHandlers_RefreshQuote_CoalescingReturnsSameID(t *testing.T) {
 	clk := clock.NewFake(testEpoch)
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, mq, clk, ig)
+	h := newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New())
 
 	doPost := func() string {
 		t.Helper()
@@ -179,7 +183,7 @@ func TestHandlers_RefreshQuote_DifferentBucketProducesNewID(t *testing.T) {
 	clk := clock.NewFake(testEpoch)
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, mq, clk, ig)
+	h := newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New())
 
 	doPost := func() string {
 		t.Helper()
@@ -213,7 +217,7 @@ func TestHandlers_RefreshQuote_EnqueueError(t *testing.T) {
 
 	clk := clock.NewFake(testEpoch)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig)
+	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig, memquoterepo.New())
 
 	body := strings.NewReader(`{"base":"EUR","quote":"MXN"}`)
 	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
@@ -239,7 +243,7 @@ func TestHandlers_RefreshQuote_ContextPropagation(t *testing.T) {
 	clk := clock.NewFake(testEpoch)
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, mq, clk, ig)
+	h := newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -342,7 +346,7 @@ func TestServerWiring_HandlersServedThroughMiddlewareChain(t *testing.T) {
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers(testWhitelist, mq, clk, ig, testWindow)
+	handlers := api.NewHandlers(testWhitelist, mq, clk, ig, testWindow, memquoterepo.New())
 	api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: api.JSONErrorHandler,
@@ -546,7 +550,7 @@ func newGetJobFixture(t *testing.T) (http.Handler, *memqueue.Queue) {
 	clk := clock.NewFake(testFixedClock)
 	mq := memqueue.New(clk)
 	ig := idgen.NewSeq()
-	return newTestHandlerWithQueue(t, mq, clk, ig), mq
+	return newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New()), mq
 }
 
 // enqueueJob is a helper that enqueues a job with the given base/quote and
@@ -796,7 +800,7 @@ func TestGetQuoteJob_RealHandler_GetByIDError(t *testing.T) {
 
 	clk := clock.NewFake(testFixedClock)
 	ig := idgen.NewSeq()
-	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig)
+	h := newTestHandlerWithQueue(t, fakeErrQueue{}, clk, ig, memquoterepo.New())
 
 	anyID := "00000000-0000-0000-0000-000000000001"
 	req := httptest.NewRequest(http.MethodGet, "/quotes/"+anyID, nil)
@@ -910,4 +914,169 @@ func TestGetLatestQuote_Validation(t *testing.T) {
 				"error code for %s", c.name)
 		})
 	}
+}
+
+// fakeErrRepo is a stub of quoterepo.QuoteRepo whose GetLatest always returns a
+// generic error (not ErrNoData). Used to exercise the 500 path in GetLatestQuote.
+type fakeErrRepo struct{}
+
+func (fakeErrRepo) UpsertBatch(_ context.Context, _ []ratesprovider.Quote) error {
+	return errors.New("boom")
+}
+func (fakeErrRepo) GetLatest(_ context.Context, _, _ string) (ratesprovider.Quote, error) {
+	return ratesprovider.Quote{}, errors.New("boom")
+}
+
+// testLatestEpoch is the fixed FetchedAt time used in GetLatestQuote tests.
+// Unix value 1748764800 gives a deterministic ETag.
+var testLatestEpoch = time.Unix(1_748_764_800, 0).UTC()
+
+// TestGetLatestQuote_Found asserts that after a quote is seeded via UpsertBatch
+// GET /quotes/latest returns 200 + JSON body + Cache-Control: public, max-age=30
+// + ETag "EUR-MXN-<unix>".
+func TestGetLatestQuote_Found(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	repo := memquoterepo.New()
+
+	wantPrice := decimal.RequireFromString("20.255648")
+	err := repo.UpsertBatch(context.Background(), []ratesprovider.Quote{
+		{
+			Pair:      ratesprovider.Pair{Base: "EUR", Quote: "MXN"},
+			Price:     wantPrice,
+			FetchedAt: testLatestEpoch,
+		},
+	})
+	require.NoError(t, err)
+
+	h := newTestHandlerWithQueue(t, mq, clk, ig, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/latest?base=EUR&quote=MXN", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "public, max-age=30", rec.Header().Get("Cache-Control"))
+	wantETag := fmt.Sprintf(`"EUR-MXN-%d"`, testLatestEpoch.Unix())
+	assert.Equal(t, wantETag, rec.Header().Get("ETag"))
+	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+
+	var body api.LatestQuote
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "EUR", body.Base)
+	assert.Equal(t, "MXN", body.Quote)
+	priceF, _ := wantPrice.Float64()
+	assert.InDelta(t, priceF, body.Price, 1e-6)
+	assert.WithinDuration(t, testLatestEpoch, body.UpdatedAt, time.Second)
+}
+
+// TestGetLatestQuote_NoData asserts that an empty repo returns 404 with
+// error code no_data and Cache-Control: no-store.
+func TestGetLatestQuote_NoData(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig, memquoterepo.New())
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/latest?base=EUR&quote=MXN", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Empty(t, rec.Header().Get("ETag"), "ETag must be absent on 404")
+
+	var envelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Equal(t, api.NoData, envelope.Error.Code)
+}
+
+// TestGetLatestQuote_304 asserts that a GET with If-None-Match matching the
+// ETag returns 304 with empty body and Cache-Control + ETag headers preserved.
+func TestGetLatestQuote_304(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	repo := memquoterepo.New()
+
+	err := repo.UpsertBatch(context.Background(), []ratesprovider.Quote{
+		{
+			Pair:      ratesprovider.Pair{Base: "EUR", Quote: "MXN"},
+			Price:     decimal.RequireFromString("20.255648"),
+			FetchedAt: testLatestEpoch,
+		},
+	})
+	require.NoError(t, err)
+
+	h := newTestHandlerWithQueue(t, mq, clk, ig, repo)
+
+	etag := fmt.Sprintf(`"EUR-MXN-%d"`, testLatestEpoch.Unix())
+	req := httptest.NewRequest(http.MethodGet, "/quotes/latest?base=EUR&quote=MXN", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotModified, rec.Code)
+	assert.Equal(t, "public, max-age=30", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, etag, rec.Header().Get("ETag"))
+	assert.Empty(t, rec.Body.String(), "304 body must be empty")
+}
+
+// TestGetLatestQuote_ETagMismatch asserts that a wrong If-None-Match value
+// results in 200 with a full body (not 304).
+func TestGetLatestQuote_ETagMismatch(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	repo := memquoterepo.New()
+
+	err := repo.UpsertBatch(context.Background(), []ratesprovider.Quote{
+		{
+			Pair:      ratesprovider.Pair{Base: "EUR", Quote: "MXN"},
+			Price:     decimal.RequireFromString("20.255648"),
+			FetchedAt: testLatestEpoch,
+		},
+	})
+	require.NoError(t, err)
+
+	h := newTestHandlerWithQueue(t, mq, clk, ig, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/latest?base=EUR&quote=MXN", nil)
+	req.Header.Set("If-None-Match", `"wrong-etag"`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "mismatched ETag must return 200, not 304")
+	assert.NotEmpty(t, rec.Body.String(), "200 body must not be empty")
+}
+
+// TestGetLatestQuote_RepoError asserts that a generic repo error (not ErrNoData)
+// results in 500 with error code internal.
+func TestGetLatestQuote_RepoError(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(testEpoch)
+	mq := memqueue.New(clk)
+	ig := idgen.NewSeq()
+	h := newTestHandlerWithQueue(t, mq, clk, ig, fakeErrRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/quotes/latest?base=EUR&quote=MXN", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var envelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Equal(t, api.Internal, envelope.Error.Code)
 }

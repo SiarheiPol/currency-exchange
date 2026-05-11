@@ -20,6 +20,7 @@ import (
 	"currency-exchange/internal/clock"
 	"currency-exchange/internal/idgen"
 	"currency-exchange/internal/queue"
+	"currency-exchange/internal/quoterepo"
 )
 
 // pairFormatRE matches exactly three uppercase ASCII letters.
@@ -32,16 +33,18 @@ type Handlers struct {
 	clk              clock.Clock
 	idgen            idgen.IDGenerator
 	coalescingWindow time.Duration
+	repo             quoterepo.QuoteRepo
 }
 
 // NewHandlers returns a Handlers ready to serve.
-func NewHandlers(whitelist []string, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator, window time.Duration) *Handlers {
+func NewHandlers(whitelist []string, q queue.JobQueue, clk clock.Clock, ig idgen.IDGenerator, window time.Duration, repo quoterepo.QuoteRepo) *Handlers {
 	return &Handlers{
 		whitelist:        whitelist,
 		q:                q,
 		clk:              clk,
 		idgen:            ig,
 		coalescingWindow: window,
+		repo:             repo,
 	}
 }
 
@@ -237,18 +240,37 @@ func renderFailed(w http.ResponseWriter, r *http.Request, view queue.JobView) {
 	_ = json.NewEncoder(w).Encode(js)
 }
 
-// GetLatestQuote handles GET /quotes/latest. Stub: always returns 404 with a
-// no_data error for valid pairs. Iter 9 replaces this with a real DB lookup.
+// GetLatestQuote handles GET /quotes/latest. Returns the most recent successful
+// quote for the given pair with Cache-Control, ETag, and conditional 304 support.
 func (h *Handlers) GetLatestQuote(w http.ResponseWriter, r *http.Request, params GetLatestQuoteParams) {
 	if status, e := h.validatePair(params.Base, params.Quote); e != nil {
 		writeError(w, status, e)
 		return
 	}
-	var envelope Error
-	envelope.Error.Code = NoData
-	envelope.Error.Message = "no successful quote yet"
+	quote, err := h.repo.GetLatest(r.Context(), params.Base, params.Quote)
+	if errors.Is(err, quoterepo.ErrNoData) {
+		writeError(w, http.StatusNotFound, newError(NoData, "no successful quote yet"))
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, newError(Internal, "could not load latest quote"))
+		return
+	}
+	etag := fmt.Sprintf(`"%s-%s-%d"`, params.Base, params.Quote, quote.FetchedAt.Unix())
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(h.coalescingWindow.Seconds())))
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	priceF, _ := quote.Price.Float64()
+	body := LatestQuote{
+		Base:      params.Base,
+		Quote:     params.Quote,
+		Price:     priceF,
+		UpdatedAt: quote.FetchedAt,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNotFound)
-	_ = json.NewEncoder(w).Encode(envelope)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(body)
 }
