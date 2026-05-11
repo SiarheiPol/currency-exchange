@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -46,7 +47,7 @@ func OpenAPIValidate(spec *openapi3.T, next http.Handler) http.Handler {
 			Route:      route,
 		}
 		if err := openapi3filter.ValidateRequest(r.Context(), reqInput); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			writeJSONError(w, http.StatusBadRequest, "invalid_request", shortenValidatorMessage(err.Error()))
 			return
 		}
 
@@ -80,6 +81,18 @@ func OpenAPIValidate(spec *openapi3.T, next http.Handler) http.Handler {
 		w.WriteHeader(rec.status)
 		_, _ = w.Write(rec.body.Bytes())
 	})
+}
+
+// shortenValidatorMessage strips the schema and value dumps that kin-openapi
+// appends to validator errors. The validator's full Error() output is useful
+// in dev/debug but exposes internal schema fragments to clients. We keep the
+// human-readable head ("request body has an error: ..." or "parameter X has
+// an error: ...") and drop everything from the first "\nSchema:" onward.
+func shortenValidatorMessage(s string) string {
+	if i := strings.Index(s, "\nSchema:"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimRight(s, "\r\n\t ")
 }
 
 // writeJSONError emits a JSON error envelope. Local copy of the api.writeError

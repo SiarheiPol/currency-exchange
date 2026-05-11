@@ -117,7 +117,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] Conditional GET handling (`If-None-Match` → `304`)
 - [x] Error envelope with stable `code` field
 - [x] `kin-openapi` runtime validation middleware in dev/test profiles only
-- [ ] Handler tests covering the full edge case matrix from `api-contract.md`
+- [x] Handler tests covering the full edge case matrix from `api-contract.md` — rows 1-9 via `TestRefreshQuote_Validation`, rows 10-15 via `TestGetQuoteJob_RealHandler_*`, rows 16-22 via `TestGetLatestQuote_*` + `TestGetLatestQuote_Validation`, row 23 via `TestPanicRecover`, row 24 via `TestRequestID`. End-to-end manually verified across all 24 rows.
 - [x] Swagger UI at `/docs/`, raw spec at `/openapi.json` (both embedded)
 - [x] `cmd/server` cleanup: replace raw log-message literals with `Ev*` constants; use `context.WithoutCancel` in shutdown log calls; extract `gracefulShutdown` helper with uniform timeouts; fix stale package doc comment
 - [x] Worker outcome relabel: replace `outcome="ok"` with `outcome="idle"/"work"` on poll branch per `capacity.md`

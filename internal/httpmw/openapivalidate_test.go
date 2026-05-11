@@ -185,3 +185,37 @@ func TestOpenAPIValidate_LogsOnInvalidResponse(t *testing.T) {
 
 	assert.True(t, found, "expected a log record with msg=%q; got log output:\n%s", wantMsg, buf.String())
 }
+
+// TestOpenAPIValidate_400MessageOmitsSchemaDump asserts that a schema-violating
+// request (lowercase pattern) yields a 400 whose error.message keeps the
+// human-readable head and strips the verbose Schema:/Value: blocks that
+// kin-openapi appends to its validator errors.
+func TestOpenAPIValidate_400MessageOmitsSchemaDump(t *testing.T) {
+	t.Parallel()
+
+	spec, err := api.GetSpec()
+	require.NoError(t, err)
+
+	sentinel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("handler must not be reached when request is invalid")
+	})
+	wrapped := httpmw.OpenAPIValidate(spec, sentinel)
+
+	body := strings.NewReader(`{"base":"eur","quote":"MXN"}`)
+	req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var errEnvelope api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errEnvelope))
+	assert.Equal(t, api.InvalidRequest, errEnvelope.Error.Code)
+
+	msg := errEnvelope.Error.Message
+	assert.NotContains(t, msg, "\nSchema:", "message must not include the schema dump")
+	assert.NotContains(t, msg, "\nValue:", "message must not include the raw value dump")
+	assert.Contains(t, msg, "doesn't match", "message must still describe what failed")
+}
