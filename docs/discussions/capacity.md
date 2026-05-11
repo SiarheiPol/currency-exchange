@@ -41,6 +41,45 @@ The cadence is the rate at which the provider itself refreshes data. Calling mor
 
 **Setting `W > T` is forbidden by configuration validation.** A startup check refuses to run if `W > T` (degenerate case, see `idempotency.md`).
 
+## Refresh latency SLA
+
+`REFRESH_MAX_LATENCY_SECONDS` is the contractual upper bound on the p99 latency from accepted `POST /quotes/refresh` to `GET /quotes/:id` reporting `status=done`. Definition and exclusions live in `api-contract.md > POST /quotes/refresh > Latency contract`; SLI shape in `monitoring.md > SLO and SLI thinking > Job completion SLI`.
+
+Default: **2s**. The SLA is not tariff-dependent at the HTTP-call level — apilayer-family p99 is ≈ 500ms across all plans — so the same baseline fits Pro+, Business, and Enterprise. Free and Basic share the same technical floor; their SLI carries less business weight because upstream data is daily anyway, and operators may relax the value if `pollInterval` headroom matters more.
+
+| Plan | `REFRESH_MAX_LATENCY_SECONDS` | Notes |
+|---|---|---|
+| Free / Basic | 5s | technically same as Pro+; loosened only because upstream data is daily |
+| Pro+ | 2s | |
+| Business | 2s | |
+| Enterprise | 1s or LISTEN/NOTIFY-driven | sub-second SLA crosses the polling-cost boundary; see `background-mechanism.md > Polling` |
+
+### Budget decomposition
+
+The SLA must accommodate every step from handler return to job completion:
+
+```
+REFRESH_MAX_LATENCY_SECONDS  ≥  pollInterval + upstream_p99 + db_p99 + margin
+              2s             ≥      1s       +    500ms     +   100ms +  400ms
+```
+
+`upstream_p99` follows the rationale in `Per-call timeouts > Outbound HTTP`. `db_p99` covers the upsert + `Complete` transaction. `margin` absorbs scheduler jitter, Go runtime pauses, and rare missed-tick scenarios. Upstream spikes that blow this budget push the job into retry; by SLI design, retried jobs are excluded from the latency metric rather than counted as breaches.
+
+### Derived worker parameters
+
+The four business-level env vars — `WHITELIST_CURRENCIES`, `SCHEDULER_TICK_SECONDS`, `COALESCING_WINDOW_SECONDS`, `REFRESH_MAX_LATENCY_SECONDS` (+ `WORKER_COUNT`) — drive two derived worker parameters:
+
+| Derived | Formula | Why |
+|---|---|---|
+| `pollInterval` | `REFRESH_MAX_LATENCY − upstream_p99 − db_p99 − margin` | tightest poll cadence that fits the SLA budget |
+| `batchSize` | `ceil(len(pairs) / WORKER_COUNT)` (minimum 1) | drain a full scheduler tick in one `Reserve` per worker; matches the `N` already prescribed in `background-mechanism.md > Concurrency model` |
+
+`leaseTime` stays sized by `Per-call timeouts > Worker job lease` (60s) — its constraint is "longer than the longest legitimate `FetchPairs` × retries", independent of the SLA budget.
+
+### Startup validation
+
+Refuse to start with a clear error if `REFRESH_MAX_LATENCY_SECONDS < upstream_p99 + db_p99 + margin` (the SLA is unachievable in the polling architecture). The operator must either relax the SLA, raise `WORKER_COUNT` if upstream is the bottleneck, or switch to LISTEN/NOTIFY (see `background-mechanism.md > Polling`).
+
 ## Worker pool `K`
 
 Default `K = 1`. Reasoning in `background-mechanism.md`: with batched `FetchPairs`, one worker per tick is enough.
@@ -216,15 +255,17 @@ For `docker compose up` (running against the fake rates provider):
 ```
 T = 30s
 W = 30s
+REFRESH_MAX_LATENCY_SECONDS = 2s
 K = 1
 DB pool size = 10
-Worker poll interval = 1s
+Worker poll interval = 1s     # derived from REFRESH_MAX_LATENCY; shown for readability
+Worker batch size = N         # derived: ceil(len(pairs) / K), 6 for [USD, EUR, MXN]
 Lease = 60s
 Log level = debug
 Plan simulation = "business"   # fake provider config
 ```
 
-These are the values in `.env.example`. Test environments override only what they need to test (e.g., setting `T = 5s` to validate scheduler behaviour faster).
+These are the values in `.env.example`. The four "business" env vars are authoritative; `Worker poll interval` and `Worker batch size` are derived and logged at startup. Test environments override only what they need to test (e.g., setting `T = 5s` to validate scheduler behaviour faster, or `REFRESH_MAX_LATENCY = 10s` to relax the SLA when running against a deliberately slow fake provider).
 
 ## AI-agent considerations
 
