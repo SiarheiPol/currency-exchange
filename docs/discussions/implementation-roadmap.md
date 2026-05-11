@@ -117,7 +117,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [ ] Handler tests covering the full edge case matrix from `api-contract.md`
 - [x] Swagger UI at `/docs/`, raw spec at `/openapi.json` (both embedded)
 - [x] `cmd/server` cleanup: replace raw log-message literals with `Ev*` constants; use `context.WithoutCancel` in shutdown log calls; extract `gracefulShutdown` helper with uniform timeouts; fix stale package doc comment
-- [ ] Worker outcome relabel: replace `outcome="ok"` with `outcome="idle"/"work"` on poll branch per `capacity.md`
+- [x] Worker outcome relabel: replace `outcome="ok"` with `outcome="idle"/"work"` on poll branch per `capacity.md`
 
 ---
 

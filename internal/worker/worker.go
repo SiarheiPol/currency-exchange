@@ -113,7 +113,11 @@ func (w *Worker) Run(ctx context.Context) error {
 				obs.WorkerIterationsTotal.WithLabelValues("error").Inc()
 				continue
 			}
-			obs.WorkerIterationsTotal.WithLabelValues("ok").Inc()
+			if len(jobs) == 0 {
+				obs.WorkerIterationsTotal.WithLabelValues("idle").Inc()
+			} else {
+				obs.WorkerIterationsTotal.WithLabelValues("work").Inc()
+			}
 			for _, job := range jobs {
 				obs.LogJobReserved(ctx, string(job.ID), job.Base, job.Quote)
 				startedAt := time.Now()

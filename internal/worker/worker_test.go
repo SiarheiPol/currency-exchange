@@ -169,20 +169,49 @@ func TestWorker_InstrumentsLifecycle(t *testing.T) {
 		worker.WithBatchSize(1),
 	)
 
-	okBefore := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("ok"))
+	workBefore := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("work"))
 	doneBefore := testutil.ToFloat64(obs.QuoteJobsTotal.WithLabelValues("done"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	_ = w.Run(ctx)
 
-	okAfter := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("ok"))
+	workAfter := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("work"))
 	doneAfter := testutil.ToFloat64(obs.QuoteJobsTotal.WithLabelValues("done"))
 
-	require.Greater(t, okAfter, okBefore,
-		"WorkerIterationsTotal{outcome=ok} should advance during the run")
+	require.Greater(t, workAfter, workBefore,
+		"WorkerIterationsTotal{outcome=work} should advance during the run")
 	require.Equal(t, doneBefore+1, doneAfter,
 		"QuoteJobsTotal{status=done} should advance by exactly 1 (one job completed)")
+}
+
+// TestWorker_PollOutcomeIdleWhenQueueEmpty asserts that when Reserve returns an
+// empty slice (no eligible jobs), the worker increments
+// WorkerIterationsTotal{outcome="idle"} rather than {outcome="work"}.
+//
+// NOT t.Parallel'd: uses prometheus global counters via delta measurement;
+// concurrent tests bumping the same counter would produce non-deterministic
+// deltas and cause flaky assertions.
+func TestWorker_PollOutcomeIdleWhenQueueEmpty(t *testing.T) {
+	clk := clock.NewFake(time.Now())
+	q := memqueue.New(clk)
+	// Do NOT enqueue any job — Reserve must return an empty slice.
+
+	w := worker.New(q, q, happyFake(clk), memquoterepo.New(), clk,
+		worker.WithPollInterval(1*time.Millisecond),
+		worker.WithCleanInterval(1*time.Second), // keep clean out of the way
+	)
+
+	idleBefore := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("idle"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = w.Run(ctx)
+
+	idleAfter := testutil.ToFloat64(obs.WorkerIterationsTotal.WithLabelValues("idle"))
+
+	require.Greater(t, idleAfter, idleBefore,
+		"WorkerIterationsTotal{outcome=idle} should advance when queue is empty")
 }
 
 // TestWorker_LastIterationUpdates asserts the worker exposes a heartbeat
