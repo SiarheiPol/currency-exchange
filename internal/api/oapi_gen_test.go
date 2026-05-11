@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	api "currency-exchange/internal/api"
 
@@ -129,11 +128,7 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 	// --- runtime: JobStatus round-trip for each union variant ---------------
 	t.Run("PendingRoundTrip", func(t *testing.T) {
 		t.Parallel()
-		want := api.JobStatusPending{
-			Base:      "USD",
-			Quote:     "EUR",
-			CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-		}
+		want := api.JobStatusPending{}
 		var union api.JobStatus
 		if err := union.FromJobStatusPending(want); err != nil {
 			t.Fatalf("FromJobStatusPending: %v", err)
@@ -141,9 +136,6 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 		got, err := union.AsJobStatusPending()
 		if err != nil {
 			t.Fatalf("AsJobStatusPending: %v", err)
-		}
-		if got.Base != want.Base || got.Quote != want.Quote {
-			t.Errorf("pending round-trip mismatch: got %+v, want %+v", got, want)
 		}
 		// FromJobStatusPending forces Status = "pending".
 		if got.Status != "pending" {

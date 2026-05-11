@@ -165,11 +165,8 @@ func (h *Handlers) GetQuoteJob(w http.ResponseWriter, r *http.Request, id openap
 func renderPending(w http.ResponseWriter, view queue.JobView) {
 	parsedUUID, _ := uuid.Parse(string(view.ID))
 	body := JobStatusPending{
-		Id:        openapi_types.UUID(parsedUUID),
-		Base:      view.Base,
-		Quote:     view.Quote,
-		Status:    Pending,
-		CreatedAt: view.CreatedAt,
+		Id:     openapi_types.UUID(parsedUUID),
+		Status: Pending,
 	}
 	var js JobStatus
 	if err := js.FromJobStatusPending(body); err != nil {
@@ -193,15 +190,14 @@ func renderDone(w http.ResponseWriter, r *http.Request, view queue.JobView) {
 		return
 	}
 	parsedUUID, _ := uuid.Parse(string(view.ID))
+	priceF, _ := view.Price.Float64()
 	body := JobStatusDone{
-		Id:          openapi_types.UUID(parsedUUID),
-		Base:        view.Base,
-		Quote:       view.Quote,
-		Status:      Done,
-		CreatedAt:   view.CreatedAt,
-		CompletedAt: *view.CompletedAt,
-		Price:       func() float64 { f, _ := view.Price.Float64(); return f }(),
-		UpdatedAt:   *view.QuoteUpdatedAt,
+		Id:        openapi_types.UUID(parsedUUID),
+		Base:      view.Base,
+		Quote:     view.Quote,
+		Status:    Done,
+		Price:     priceF,
+		UpdatedAt: *view.QuoteUpdatedAt,
 	}
 	var js JobStatus
 	if err := js.FromJobStatusDone(body); err != nil {
@@ -228,15 +224,8 @@ func renderFailed(w http.ResponseWriter, r *http.Request, view queue.JobView) {
 		Base:        view.Base,
 		Quote:       view.Quote,
 		Status:      Failed,
-		CreatedAt:   view.CreatedAt,
 		CompletedAt: *view.CompletedAt,
-		Error: struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		}{
-			Code:    "upstream_unavailable",
-			Message: view.LastError,
-		},
+		Error:       view.LastError,
 	}
 	var js JobStatus
 	if err := js.FromJobStatusFailed(body); err != nil {

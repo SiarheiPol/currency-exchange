@@ -594,8 +594,6 @@ func TestGetQuoteJob_RealHandler_Pending(t *testing.T) {
 	pending, err := js.AsJobStatusPending()
 	require.NoError(t, err)
 	assert.Equal(t, api.JobStatusPendingStatus("pending"), pending.Status)
-	assert.Equal(t, "EUR", pending.Base)
-	assert.Equal(t, "MXN", pending.Quote)
 
 	wantUUID, parseErr := uuid.Parse(string(id))
 	require.NoError(t, parseErr)
@@ -689,8 +687,7 @@ func TestGetQuoteJob_RealHandler_Failed(t *testing.T) {
 	failed, err := js.AsJobStatusFailed()
 	require.NoError(t, err)
 	assert.Equal(t, api.JobStatusFailedStatus("failed"), failed.Status)
-	assert.Equal(t, "upstream_unavailable", failed.Error.Code)
-	assert.Equal(t, "upstream timeout", failed.Error.Message)
+	assert.Equal(t, "upstream timeout", failed.Error)
 }
 
 // TestGetQuoteJob_RealHandler_304Done asserts that a GET with If-None-Match

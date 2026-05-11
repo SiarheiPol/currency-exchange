@@ -116,14 +116,12 @@ type JobStatus struct {
 
 // JobStatusDone defines model for JobStatusDone.
 type JobStatusDone struct {
-	Base        string              `json:"base"`
-	CompletedAt time.Time           `json:"completed_at"`
-	CreatedAt   time.Time           `json:"created_at"`
-	Id          openapi_types.UUID  `json:"id"`
-	Price       float64             `json:"price"`
-	Quote       string              `json:"quote"`
-	Status      JobStatusDoneStatus `json:"status"`
-	UpdatedAt   time.Time           `json:"updated_at"`
+	Base      string              `json:"base"`
+	Id        openapi_types.UUID  `json:"id"`
+	Price     float64             `json:"price"`
+	Quote     string              `json:"quote"`
+	Status    JobStatusDoneStatus `json:"status"`
+	UpdatedAt time.Time           `json:"updated_at"`
 }
 
 // JobStatusDoneStatus defines model for JobStatusDone.Status.
@@ -131,16 +129,12 @@ type JobStatusDoneStatus string
 
 // JobStatusFailed defines model for JobStatusFailed.
 type JobStatusFailed struct {
-	Base        string    `json:"base"`
-	CompletedAt time.Time `json:"completed_at"`
-	CreatedAt   time.Time `json:"created_at"`
-	Error       struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-	Id     openapi_types.UUID    `json:"id"`
-	Quote  string                `json:"quote"`
-	Status JobStatusFailedStatus `json:"status"`
+	Base        string                `json:"base"`
+	CompletedAt time.Time             `json:"completed_at"`
+	Error       string                `json:"error"`
+	Id          openapi_types.UUID    `json:"id"`
+	Quote       string                `json:"quote"`
+	Status      JobStatusFailedStatus `json:"status"`
 }
 
 // JobStatusFailedStatus defines model for JobStatusFailed.Status.
@@ -148,11 +142,8 @@ type JobStatusFailedStatus string
 
 // JobStatusPending defines model for JobStatusPending.
 type JobStatusPending struct {
-	Base      string                 `json:"base"`
-	CreatedAt time.Time              `json:"created_at"`
-	Id        openapi_types.UUID     `json:"id"`
-	Quote     string                 `json:"quote"`
-	Status    JobStatusPendingStatus `json:"status"`
+	Id     openapi_types.UUID     `json:"id"`
+	Status JobStatusPendingStatus `json:"status"`
 }
 
 // JobStatusPendingStatus defines model for JobStatusPending.Status.
@@ -668,32 +659,32 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"8vsvDFTdkMY7KkP118NLM4iX/hcAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
