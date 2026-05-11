@@ -32,18 +32,25 @@ func TestRecoverExpired_IgnoresNonRunningStatuses(t *testing.T) {
 	pastLease := knownTime.Add(-1 * time.Hour)
 
 	// Insert three rows directly with non-running statuses and a past lease_until.
+	// 'done' rows must carry price and quote_updated_at per the done_has_quote CHECK.
 	statuses := []string{"pending", "done", "failed"}
 	ids := make([]string, len(statuses))
 	for i, status := range statuses {
 		id := idg.NewID()
 		ids[i] = id
+		var price any
+		var quoteUpdatedAt any
+		if status == "done" {
+			price = "1.0"
+			quoteUpdatedAt = knownTime
+		}
 		_, err := pool.Exec(ctx, `
 			INSERT INTO quote_jobs (
 				id, base, quote, status, attempts,
 				next_run_at, created_at, updated_at,
-				lease_until
-			) VALUES ($1, $2, $3, $4, 0, $5, $5, $5, $6)`,
-			id, "GBP", "USD", status, knownTime, pastLease,
+				lease_until, price, quote_updated_at
+			) VALUES ($1, $2, $3, $4, 0, $5, $5, $5, $6, $7, $8)`,
+			id, "GBP", "USD", status, knownTime, pastLease, price, quoteUpdatedAt,
 		)
 		require.NoError(t, err)
 	}
