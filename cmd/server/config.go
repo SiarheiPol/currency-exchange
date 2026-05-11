@@ -27,6 +27,9 @@ type Config struct {
 	WorkerCount       int
 	PollInterval      time.Duration
 	BatchSize         int
+
+	// LogLevel is the canonical lowercase slog level. One of: debug, info, warn, error.
+	LogLevel string
 }
 
 const defaultProviderBaseURL = "https://api.currencylayer.com"
@@ -132,6 +135,20 @@ func Load() (*Config, error) {
 		return nil, errors.New("WORKER_COUNT must be >= 1")
 	}
 	cfg.WorkerCount = workerCount
+
+	// LOG_LEVEL
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "", "info":
+		cfg.LogLevel = "info"
+	case "debug":
+		cfg.LogLevel = "debug"
+	case "warn":
+		cfg.LogLevel = "warn"
+	case "error":
+		cfg.LogLevel = "error"
+	default:
+		return nil, errors.New("LOG_LEVEL must be one of: debug, info, warn, error")
+	}
 
 	// Derived fields.
 	cfg.PollInterval = cfg.RefreshMaxLatency - upstreamP99 - dbP99 - slaMargin

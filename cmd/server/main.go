@@ -55,12 +55,27 @@ func main() {
 }
 
 func run() error {
+	// Bootstrap with a plain handler so any Load() error can be logged.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	cfg, err := Load()
 	if err != nil {
 		return err
 	}
+
+	// Rewire the default logger now that we know the desired level.
+	var lvl slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "info":
+		lvl = slog.LevelInfo
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})))
 
 	// Load the embedded OpenAPI spec early so startup fails fast before any
 	// goroutines are launched. Only used when Env != "production".

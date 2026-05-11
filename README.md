@@ -1,119 +1,110 @@
 # Currency Quote Service
 
-Go HTTP service providing currency exchange rate quotes via an asynchronous refresh pattern. Clients trigger a refresh, receive an `update_id`, and poll for the result. Latest successful quote is also available synchronously per currency.
-
-## API
-
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/quotes/refresh` | POST | trigger a background fetch for a currency; returns `update_id` |
-| `/quotes/:id` | GET | poll the status of a refresh job |
-| `/quotes/latest/:currency` | GET | read the latest successful quote |
-| `/healthz` | GET | liveness probe |
-| `/readyz` | GET | readiness probe (DB ping + scheduler + worker checks) |
-| `/metrics` | GET | Prometheus metrics (service collectors plus standard Go runtime and process collectors) |
-| `/openapi.yaml` | GET | API specification (source of truth) |
-| `/docs/` | GET | Swagger UI |
-
-Full contract in [docs/discussions/api-contract.md](docs/discussions/api-contract.md). Spec: [api/openapi.yaml](api/openapi.yaml).
-
-Supported currencies (whitelist): `USD`, `EUR`, `MXN`. Configurable via env.
+A REST service that returns current exchange rates between whitelisted currency pairs, refreshing in the background from an external rates provider with coalesced upstream calls.
 
 ## Requirements
 
-- Go 1.24+
-- Docker and Docker Compose (for running the full stack)
-- `make` (Makefile is the entry point for build / test / lint)
+- Go 1.25
+- Docker (for building images, running Postgres locally)
+- PostgreSQL 16 (provided via Docker for local development)
 
-External dependencies (run via Docker Compose): Postgres, Prometheus, Grafana, fake rates provider.
+## Quick start (local, without Compose)
 
-## Quick Start
+Compose stack is coming in a follow-up iteration. For now, run the pieces directly:
 
 ```bash
-git clone <repo-url>
-cd <repo>
-cp .env.example .env
-docker compose up
+# Terminal 1: Postgres
+docker run --rm -d --name plata-pg \
+  -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=quotes \
+  postgres:16
+
+# Apply schema (export DB_DSN first)
+export DB_DSN=postgres://postgres:postgres@localhost:5432/quotes?sslmode=disable
+make migrate-up
+
+# Terminal 2: fake rates provider (no API key required)
+make run-fakeprovider
+
+# Terminal 3: service (point at fake provider)
+export PROVIDER_BASE_URL=http://localhost:9090
+export PROVIDER_API_KEY=test
+make run
 ```
 
-The stack starts:
-- The service on `:8080`.
-- Postgres on `:5432`.
-- A fake rates provider on `:8081` (no external API key needed).
-- Prometheus on `:9090`.
-- Grafana on `:3000` with auto-provisioned dashboards.
+Visit `http://localhost:8080/healthz` to confirm.
 
-Smoke-check:
+## Build
 
 ```bash
-curl -X POST http://localhost:8080/quotes/refresh \
-     -H 'Content-Type: application/json' \
-     -d '{"currency":"EUR"}'
-# → 202 Accepted {"id":"abc-..."}
-
-curl http://localhost:8080/quotes/latest/EUR
-# → 200 OK {"currency":"EUR","price":...,"updated_at":"..."}
+make build                    # both binaries to ./bin/
+make check                    # generate + go test -race + golangci-lint
+make docker-build-server      # build server image
+make docker-build-fakeprovider
 ```
 
 ## Configuration
 
-All configuration via environment variables. See [.env.example](.env.example) for the full list with descriptions and recommended ranges.
-
-Key variables:
+All configuration is via environment variables. See `.env.example` for the full list with defaults.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DB_DSN` | `postgres://...` | Postgres connection string |
-| `PROVIDER_API_KEY` | (required) | API key for the upstream rates provider |
-| `PROVIDER_BASE_URL` | `https://api.currencylayer.com` | upstream rates base URL |
-| `SCHEDULER_TICK_SECONDS` | 30 | scheduler interval `T` |
-| `COALESCING_WINDOW_SECONDS` | 30 | dedup bucket size `W` (constraint: `W ≤ T`) |
-| `WORKER_COUNT` | 1 | number of worker goroutines `K` |
-| `WHITELIST_CURRENCIES` | `USD,EUR,MXN` | comma-separated supported currencies |
-| `REFRESH_MAX_LATENCY_MS` | 2000 | SLA upper bound on refresh p99 (integer ms; floor 1000) |
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `HTTP_ADDR` | `:8080` | HTTP listen address |
+| `DB_DSN` | (required) | Postgres connection string |
+| `PROVIDER_BASE_URL` | `https://api.currencylayer.com` | Upstream provider URL |
+| `PROVIDER_API_KEY` | (required) | Upstream provider API key |
+| `WHITELIST_CURRENCIES` | `USD,EUR,MXN` | Comma-separated currency whitelist |
+| `SCHEDULER_TICK_SECONDS` | `30` | Quiet-traffic refresh cadence |
+| `COALESCING_WINDOW_SECONDS` | `30` | Refresh coalescing bucket size |
+| `WORKER_COUNT` | `1` | Background worker pool size |
+| `REFRESH_MAX_LATENCY_MS` | `2000` | P99 SLA budget for refresh; `pollInterval` and `batchSize` are derived |
+| `APP_ENV` | `development` | `production` disables OpenAPI runtime validation |
+| `LOG_LEVEL` | `info` | One of: debug, info, warn, error |
 
-The worker's `pollInterval` and `batchSize` are derived from
-`REFRESH_MAX_LATENCY_MS`, `WHITELIST_CURRENCIES`, and `WORKER_COUNT` — not
-separate env vars. Effective values are logged at startup as `derived worker
-config`. Tariff-plan-specific tuning is in [docs/discussions/capacity.md](docs/discussions/capacity.md).
+### Fake rates provider (development only)
 
-## Development
+| Variable | Default | Purpose |
+|---|---|---|
+| `FAKE_ADDR` | `:9090` | Fake provider listen address |
+| `FAKE_SEED` | `42` | RNG seed for deterministic runs |
+| `FAKE_MONTHLY_QUOTA` | `100` | Simulated monthly quota |
+| `FAKE_ACCESS_KEY` | (empty = any key) | Optional strict-mode access key |
+| `FAKE_UPSTREAM_CADENCE_SECONDS` | `0` | Cache rates per window (0 = advance every call) |
+| `FAKE_LATENCY_MIN_MS` | `0` | Lower bound for injected latency |
+| `FAKE_LATENCY_MAX_MS` | `0` | Upper bound; must be >= MIN |
+
+## API
+
+The OpenAPI spec is at `api/openapi.yaml`. Main endpoints:
+
+- `GET /quotes/latest?base=USD&quote=EUR` — latest cached quote.
+- `GET /quotes/{id}` — quote by ID.
+- `POST /quotes/refresh` — request a fresh upstream fetch (async, coalesced).
+- `GET /healthz` — liveness probe.
+- `GET /readyz` — readiness probe (DB ping + scheduler + worker checks).
+- `GET /metrics` — Prometheus metrics.
+
+## Testing
 
 ```bash
-make check         # codegen + git diff check + tests + lint (the CI gate)
-make test          # unit tests only (fast)
-make test-integration  # integration tests with build tag (testcontainers)
-make lint          # golangci-lint
-make generate      # regenerate code from api/openapi.yaml
-make run           # run the service locally against docker-compose dependencies
-make loadtest      # k6 baseline scenario (Stage 6)
+make test                # unit + race
+make test-integration    # requires DB_DSN pointing at a live Postgres
+make test-fakeprovider   # fakeprovider-only
+make coverage            # writes coverage.out
+make coverage-html       # writes coverage.html
 ```
 
-Development methodology and conventions are in [docs/conventions.md](docs/conventions.md). The full set of design decisions is in [docs/discussions/](docs/discussions/).
+## Migrations
 
-## Project Structure
-
-```
-cmd/                 service binaries (server, fakeprovider)
-internal/            service-private packages (api, queue, worker, scheduler, obs, ratesprovider, ...)
-api/                 openapi.yaml + codegen config
-deploy/              docker-compose, Grafana dashboards, Prometheus rules
-loadtest/            k6 scenarios
-migrations/          SQL migrations
-docs/                top-level docs + discussions/ (decision records)
-testdata/            static test fixtures
+```bash
+export DB_DSN=postgres://postgres:postgres@localhost:5432/quotes?sslmode=disable
+make migrate-up          # apply all pending
+make migrate-down        # roll back one step
 ```
 
-Full layout and rationale in [docs/architecture.md](docs/architecture.md).
+Migrations live in `migrations/`. The server does NOT run them on startup in this MVP; the operator applies them out of band.
 
-## Documentation
+## Architecture
 
-- **For agents (and humans):** start with [AI_CONTEXT.md](AI_CONTEXT.md) — the agent hub.
-- **For reviewers:** start with [docs/architecture.md](docs/architecture.md) and [docs/project.md](docs/project.md).
-- **For implementers:** [docs/discussions/implementation-roadmap.md](docs/discussions/implementation-roadmap.md) is the build-order checklist.
-- **For operators:** [docs/discussions/monitoring.md](docs/discussions/monitoring.md), [docs/discussions/resilience.md](docs/discussions/resilience.md), [docs/discussions/capacity.md](docs/discussions/capacity.md).
-
-## Status
-
-This repository is in the documentation phase. Implementation follows the stages in [docs/discussions/implementation-roadmap.md](docs/discussions/implementation-roadmap.md). See that document for current progress.
+See `docs/architecture.md` for the design. The roadmap lives at `docs/discussions/implementation-roadmap.md`.

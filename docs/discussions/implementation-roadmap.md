@@ -148,10 +148,10 @@ Run-from-zero story for reviewers and operators.
 
 ### Service packaging
 
-- [ ] `Dockerfile` (multi-stage, distroless or scratch final)
-- [ ] Configuration via env vars (DSN, `T`, `W`, provider URL, provider key, `K`, etc.)
+- [x] `Dockerfile` (multi-stage, distroless or scratch final)
+- [x] Configuration via env vars (DSN, `T`, `W`, provider URL, provider key, `K`, etc.)
 - [x] Graceful shutdown wired in order: HTTP → scheduler → worker → exit
-- [ ] `README.md` with build/run instructions, env vars, endpoints
+- [x] `README.md` with build/run instructions, env vars, endpoints
 
 ### Fake rates provider
 

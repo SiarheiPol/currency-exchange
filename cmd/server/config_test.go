@@ -238,3 +238,51 @@ func TestConfig_Load_SLABelowFloor_ErrorMessageMentionsValues(t *testing.T) {
 	require.Contains(t, err.Error(), "500")
 	require.Contains(t, err.Error(), "1000")
 }
+
+func TestConfig_LogLevel_DefaultsToInfo(t *testing.T) {
+	setValidMinimalEnv(t)
+	// LOG_LEVEL is not set; Load() must default to "info".
+	t.Setenv("LOG_LEVEL", "")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, "info", cfg.LogLevel)
+}
+
+func TestConfig_LogLevel_ValidValuesAccepted(t *testing.T) {
+	cases := []struct {
+		input     string
+		wantLower string
+	}{
+		{"debug", "debug"},
+		{"info", "info"},
+		{"warn", "warn"},
+		{"error", "error"},
+		{"DEBUG", "debug"},
+		{"Info", "info"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			setValidMinimalEnv(t)
+			t.Setenv("LOG_LEVEL", tc.input)
+
+			cfg, err := Load()
+
+			require.NoError(t, err)
+			require.Equal(t, tc.wantLower, cfg.LogLevel)
+		})
+	}
+}
+
+func TestConfig_LogLevel_InvalidValueRejected(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("LOG_LEVEL", "garbage")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "LOG_LEVEL")
+}

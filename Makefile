@@ -1,7 +1,8 @@
 .PHONY: check test test-integration test-fakeprovider coverage coverage-html lint generate \
         build build-server build-fakeprovider \
         run run-fakeprovider \
-        migrate-up migrate-down
+        migrate-up migrate-down \
+        docker-build-server docker-build-fakeprovider
 
 COVERAGE_FILE ?= coverage.out
 
@@ -51,3 +52,9 @@ migrate-up:
 
 migrate-down:
 	go tool migrate -path migrations -database "$(DB_DSN)" down 1
+
+docker-build-server:
+	docker build --target server -t plata-server:dev .
+
+docker-build-fakeprovider:
+	docker build --target fakeprovider -t plata-fakeprovider:dev .
