@@ -23,4 +23,5 @@ const (
 	EvSchedulerStopTimeout        = "scheduler stop timeout"
 	EvFakeproviderStarted         = "fakeprovider starting"
 	EvFakeproviderShutdown        = "shutdown signal received"
+	EvPanicRecovered              = "panic recovered"
 )

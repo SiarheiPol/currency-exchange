@@ -106,7 +106,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] `oapi-codegen` wired in `go generate` — see `openapi.md`
 - [x] `internal/api/oapi_gen.go` checked in
 - [x] `make check` includes `git diff --exit-code` after `go generate`
-- [ ] `httpmw.PanicRecover` middleware — recovers panics in HTTP handlers and goroutine wrappers; returns 500 error envelope; logs `EvPanicRecovered` with request_id, panic value, and stack — see `api-contract.md` (row 23) and `monitoring.md`
+- [x] `httpmw.PanicRecover` middleware — recovers panics in HTTP handlers and goroutine wrappers; returns 500 error envelope; logs `EvPanicRecovered` with request_id, panic value, and stack — see `api-contract.md` (row 23) and `monitoring.md`
 - [ ] `httpmw.Metrics` middleware — records `HTTPRequestsTotal`, `HTTPRequestDuration`, `HTTPRequestsInFlight` per handler — see `monitoring.md`
 - [ ] Handler implementations satisfying generated `ServerInterface`
 - [ ] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`

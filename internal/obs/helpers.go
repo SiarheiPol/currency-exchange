@@ -2,6 +2,7 @@ package obs
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -148,5 +149,16 @@ func LogProviderResponseAnomaly(ctx context.Context, provider, kind, detail stri
 		slog.String("provider", provider),
 		slog.String("kind", kind),
 		slog.String("detail", detail),
+	)
+}
+
+// LogPanicRecovered logs a recovered panic with its value and stack trace.
+// recovered is the value passed to panic(); stack is the output of debug.Stack().
+// The log record is emitted at ERROR level with fields "panic" and "stack".
+// Any request_id present in ctx is automatically attached by Logger.
+func LogPanicRecovered(ctx context.Context, recovered any, stack []byte) {
+	Logger(ctx).LogAttrs(ctx, slog.LevelError, EvPanicRecovered,
+		slog.String("panic", fmt.Sprintf("%+v", recovered)),
+		slog.String("stack", string(stack)),
 	)
 }

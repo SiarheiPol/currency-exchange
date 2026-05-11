@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -99,6 +100,12 @@ func run() error {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
+		defer func() {
+			if r := recover(); r != nil {
+				obs.LogPanicRecovered(workerCtx, r, debug.Stack())
+				stop()
+			}
+		}()
 		obs.Logger(workerCtx).Info("worker starting")
 		if err := w.Run(workerCtx); err != nil && !errors.Is(err, context.Canceled) {
 			obs.Logger(workerCtx).Error("worker exited unexpectedly", "error", err)
@@ -120,6 +127,12 @@ func run() error {
 	schedDone := make(chan struct{})
 	go func() {
 		defer close(schedDone)
+		defer func() {
+			if r := recover(); r != nil {
+				obs.LogPanicRecovered(schedCtx, r, debug.Stack())
+				stop()
+			}
+		}()
 		obs.Logger(schedCtx).Info(obs.EvSchedulerStarted)
 		if err := sched.Run(schedCtx); err != nil && !errors.Is(err, context.Canceled) {
 			obs.Logger(schedCtx).Error(obs.EvSchedulerExitedUnexpectedly, "error", err)
@@ -140,7 +153,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpmw.RequestID(mux),
+		Handler:           httpmw.PanicRecover(httpmw.RequestID(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
