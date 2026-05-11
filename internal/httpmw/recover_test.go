@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,14 @@ import (
 	"currency-exchange/internal/obs"
 )
 
+// discardCtx returns a context with a logger that swallows all output. Used by
+// tests whose panic-recovery logging would otherwise emit visible ERROR lines
+// in go test -v output.
+func discardCtx() context.Context {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return obs.WithLogger(context.Background(), logger)
+}
+
 // compile-time signature check: PanicRecover must be a standard middleware.
 var _ func(http.Handler) http.Handler = httpmw.PanicRecover
 
@@ -28,7 +37,7 @@ func TestPanicRecover_RecoversAndReturns500(t *testing.T) {
 	})
 	wrapped := httpmw.PanicRecover(panickyHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(discardCtx())
 	rec := httptest.NewRecorder()
 	wrapped.ServeHTTP(rec, req)
 
@@ -53,7 +62,7 @@ func TestPanicRecover_DoesNotLeakPanicValue(t *testing.T) {
 	})
 	wrapped := httpmw.PanicRecover(panickyHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(discardCtx())
 	rec := httptest.NewRecorder()
 	wrapped.ServeHTTP(rec, req)
 
