@@ -4,7 +4,7 @@
         migrate-up migrate-down \
         docker-build-server docker-build-fakeprovider \
         compose-validate \
-        loadtest loadtest-coalesce
+        loadtest loadtest-coalesce loadtest-read loadtest-burst loadtest-fail
 
 COVERAGE_FILE ?= coverage.out
 
@@ -69,8 +69,29 @@ compose-validate:
 loadtest:
 	docker compose --profile loadtest run --rm \
 		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
+		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
 		k6 run /scripts/profile1.js
 
 loadtest-coalesce:
 	docker compose --profile loadtest run --rm \
 		k6 run /scripts/profile4.js
+
+loadtest-read:
+	docker compose --profile loadtest run --rm \
+		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
+		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		k6 run /scripts/profile2.js
+
+loadtest-burst:
+	docker compose --profile loadtest run --rm \
+		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
+		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		k6 run /scripts/profile3.js
+
+loadtest-fail:
+	@echo "Reminder: start the stack with FAKE_LATENCY_MIN_MS and FAKE_LATENCY_MAX_MS to activate latency injection."
+	@echo "Example: FAKE_LATENCY_MIN_MS=500 FAKE_LATENCY_MAX_MS=2000 docker compose up -d"
+	docker compose --profile loadtest run --rm \
+		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
+		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		k6 run /scripts/profile5.js

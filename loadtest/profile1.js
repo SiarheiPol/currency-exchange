@@ -6,7 +6,7 @@ export const options = {
   scenarios: {
     mixed_load: {
       executor: "constant-arrival-rate",
-      rate: 50,
+      rate: __ENV.LOADTEST_RATE || 50,
       timeUnit: "1s",
       duration: __ENV.LOADTEST_DURATION || "30s",
       preAllocatedVUs: 50,

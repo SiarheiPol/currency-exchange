@@ -38,6 +38,8 @@ services:
       FAKE_ADDR: ":9090"
       FAKE_SEED: "42"
       FAKE_MONTHLY_QUOTA: "100000"
+      FAKE_LATENCY_MIN_MS: "${FAKE_LATENCY_MIN_MS:-0}"
+      FAKE_LATENCY_MAX_MS: "${FAKE_LATENCY_MAX_MS:-0}"
 
   server:
     build:
