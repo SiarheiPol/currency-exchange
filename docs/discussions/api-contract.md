@@ -61,43 +61,29 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
 - One body shape means one parser on the client side. No branch on status code before reading JSON.
 - Cache headers are explicit per status (see below) and do not depend on default proxy behavior for unusual codes.
 
-**Common fields:**
-```json
-{
-  "id":         "9b6e1f3a-...",
-  "base":       "EUR",
-  "quote":      "MXN",
-  "status":     "pending | done | failed",
-  "created_at": "2026-04-29T08:00:00Z"
-}
-```
-
 **`status = pending`:**
 ```json
 {
-  "id":         "9b6e1f3a-...",
-  "base":       "EUR",
-  "quote":      "MXN",
-  "status":     "pending",
-  "created_at": "2026-04-29T08:00:00Z"
+  "id":     "9b6e1f3a-...",
+  "status": "pending"
 }
 ```
+
+The pending body carries no payload beyond `id` and the discriminator — the job has no price yet, and operators read latency from `quote_jobs_completion_seconds` rather than from the response.
 
 **`status = done`:**
 ```json
 {
-  "id":           "9b6e1f3a-...",
-  "base":         "EUR",
-  "quote":        "MXN",
-  "status":       "done",
-  "created_at":   "2026-04-29T08:00:00Z",
-  "completed_at": "2026-04-29T08:00:01Z",
-  "price":        20.255648,
-  "updated_at":   "2026-04-29T08:00:01Z"
+  "id":         "9b6e1f3a-...",
+  "base":       "EUR",
+  "quote":      "MXN",
+  "status":     "done",
+  "price":      20.255648,
+  "updated_at": "2026-04-29T08:00:01Z"
 }
 ```
 
-`price` is in forex convention: `price = 20.255648` means "1 EUR = 20.255648 MXN". `updated_at` is derived from the upstream response `timestamp` field (Unix seconds), not from the local clock.
+`price` is in forex convention: `price = 20.255648` means "1 EUR = 20.255648 MXN". `updated_at` is derived from the upstream response `timestamp` field (Unix seconds), not from the local clock — it is the freshness signal the original task statement asks for. `base`/`quote` echo the request so the response is self-describing for tools and dashboards that only have the `id`.
 
 **`status = failed`:**
 ```json
@@ -106,13 +92,14 @@ Reasoning behind "always 200 + `status` field" instead of `202` / `200` / `5xx`:
   "base":         "EUR",
   "quote":        "MXN",
   "status":       "failed",
-  "created_at":   "2026-04-29T08:00:00Z",
   "completed_at": "2026-04-29T08:01:30Z",
-  "error":        { "code": "upstream_unavailable", "message": "rates provider returned success:false, api_code=104" }
+  "error":        "rates provider returned success:false, api_code=104"
 }
 ```
 
-`attempts` (the worker's retry counter) is intentionally not exposed in either `pending` or `failed` bodies — it is an internal lifecycle detail. The client cannot act on it: the polling cadence is bounded by `Retry-After: 1` on pending and by `Cache-Control: max-age=…, immutable` on the terminal responses. Operators read attempt counts from logs and `quote_jobs_attempts` histogram in Prometheus.
+`completed_at` on `failed` marks when the retry budget was exhausted — useful as a "gave up at" marker that has no analogue elsewhere in the response. `error` is a plain string; there is no `code` field, because every failure routed through `Fail()` carries the same kind of upstream problem (the structured `{code, message}` shape is reserved for client-side error envelopes — 4xx/5xx with the stable code enum). Internal classification of failure causes lives in logs and the `quote_jobs_total{outcome="failed"}` metric.
+
+`created_at`, `attempts`, and the structured `error.code` field were all considered for these bodies and dropped: `created_at` is redundant (the client knows when it sent the POST); `attempts` is an internal retry counter with no actionable use for clients; and `error.code` would always be the same value with the current single-provider failure classification.
 
 **HTTP codes used by this endpoint:**
 
