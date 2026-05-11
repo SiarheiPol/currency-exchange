@@ -1,10 +1,12 @@
 // Package api_test contains handler-skeleton tests for internal/api/server.go.
 // These tests drive the implementer to create the Handlers struct and its three
-// stub implementations of api.ServerInterface.
+// stub implementations of api.ServerInterface, plus pair validation and JSON
+// error envelope support.
 package api_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,13 +28,19 @@ import (
 // package fails to compile and go test reports a build error — a valid RED state.
 var _ api.ServerInterface = (*api.Handlers)(nil)
 
-// newTestHandler builds the HandlerFromMux chain used by Tests 2–4.
+// testWhitelist is the canonical whitelist used across all unit tests.
+var testWhitelist = []string{"USD", "EUR", "MXN"}
+
+// newTestHandler builds the HandlerWithOptions chain used by Tests 2–4.
 // It does NOT include the middleware stack; for that see Test 5.
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers()
-	return api.HandlerFromMux(handlers, mux)
+	handlers := api.NewHandlers(testWhitelist)
+	return api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
+		BaseRouter:       mux,
+		ErrorHandlerFunc: api.JSONErrorHandler,
+	})
 }
 
 // TestHandlers_RefreshQuote_ReturnsStubAccepted asserts that POST /quotes/refresh
@@ -166,8 +174,11 @@ func TestServerWiring_HandlersServedThroughMiddlewareChain(t *testing.T) {
 	// NOT parallel: uses prometheus global counters via delta measurement.
 
 	mux := http.NewServeMux()
-	handlers := api.NewHandlers()
-	api.HandlerFromMux(handlers, mux)
+	handlers := api.NewHandlers(testWhitelist)
+	api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
+		BaseRouter:       mux,
+		ErrorHandlerFunc: api.JSONErrorHandler,
+	})
 	chain := httpmw.RequestID(httpmw.PanicRecover(httpmw.Metrics(mux)))
 	srv := httptest.NewServer(chain)
 	defer srv.Close()
@@ -211,4 +222,220 @@ func TestServerWiring_HandlersServedThroughMiddlewareChain(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode,
 			"GET /notarealpath must return 404 from mux default handler")
 	})
+}
+
+// TestJSONErrorHandler_WritesEnvelope pins the public contract of api.JSONErrorHandler.
+// It must write a 400 with Content-Type: application/json, Cache-Control: no-store,
+// and a body that unmarshals into api.Error with code == invalid_request.
+func TestJSONErrorHandler_WritesEnvelope(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	api.JSONErrorHandler(rec, req, errors.New("some parse error"))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+
+	var body api.Error
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, api.InvalidRequest, body.Error.Code)
+	// Message content is implementer's choice — do not assert exact text.
+}
+
+// TestRefreshQuote_Validation exercises the three-step pair validation
+// (format → whitelist → self-pair) for POST /quotes/refresh.
+// Every case expects 400 + JSON error envelope with Cache-Control: no-store.
+func TestRefreshQuote_Validation(t *testing.T) {
+	t.Parallel()
+
+	type tc struct {
+		name           string
+		body           string
+		setContentType bool
+		wantStatus     int
+		wantCode       api.ErrorErrorCode
+	}
+
+	cases := []tc{
+		{
+			name:           "RejectsMissingContentType",
+			body:           `{"base":"EUR","quote":"MXN"}`,
+			setContentType: false,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsEmptyBody",
+			body:           "",
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsNonJSONBody",
+			body:           "not json at all",
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsMissingQuoteField",
+			body:           `{"base":"EUR"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsLowercaseBase",
+			body:           `{"base":"eur","quote":"MXN"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsLowercaseQuote",
+			body:           `{"base":"EUR","quote":"mxn"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsShortCode",
+			body:           `{"base":"EU","quote":"MXN"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+		{
+			name:           "RejectsUnsupportedBase",
+			body:           `{"base":"JPY","quote":"MXN"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.UnsupportedCurrency,
+		},
+		{
+			name:           "RejectsUnsupportedQuote",
+			body:           `{"base":"EUR","quote":"GBP"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.UnsupportedCurrency,
+		},
+		{
+			name:           "RejectsSelfPair",
+			body:           `{"base":"EUR","quote":"EUR"}`,
+			setContentType: true,
+			wantStatus:     http.StatusBadRequest,
+			wantCode:       api.InvalidRequest,
+		},
+	}
+
+	h := newTestHandler(t)
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bodyReader *strings.Reader
+			if c.body != "" {
+				bodyReader = strings.NewReader(c.body)
+			} else {
+				bodyReader = strings.NewReader("")
+			}
+			req := httptest.NewRequest(http.MethodPost, "/quotes/refresh", bodyReader)
+			if c.setContentType {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, c.wantStatus, rec.Code,
+				"status code for %s", c.name)
+			assert.Contains(t, rec.Header().Get("Content-Type"), "application/json",
+				"Content-Type must be application/json for %s", c.name)
+			assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"),
+				"Cache-Control must be no-store for %s", c.name)
+
+			var envelope api.Error
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope),
+				"body must unmarshal into api.Error for %s", c.name)
+			assert.Equal(t, c.wantCode, envelope.Error.Code,
+				"error code for %s", c.name)
+		})
+	}
+}
+
+// TestGetLatestQuote_Validation exercises the three-step pair validation
+// (format → whitelist → self-pair) for GET /quotes/latest.
+// Every case expects 400 + JSON error envelope with Cache-Control: no-store.
+func TestGetLatestQuote_Validation(t *testing.T) {
+	t.Parallel()
+
+	type tc struct {
+		name       string
+		query      string
+		wantStatus int
+		wantCode   api.ErrorErrorCode
+	}
+
+	cases := []tc{
+		{
+			// Codegen wrapper's ErrorHandlerFunc path — pins Q6 override.
+			// The "quote" param is Required:true in the OpenAPI spec; codegen calls
+			// siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName:"quote"}).
+			// With the JSONErrorHandler override that produces the JSON envelope.
+			name:       "RejectsMissingQuoteParam",
+			query:      "?base=EUR",
+			wantStatus: http.StatusBadRequest,
+			wantCode:   api.InvalidRequest,
+		},
+		{
+			name:       "RejectsLowercaseBase",
+			query:      "?base=eur&quote=MXN",
+			wantStatus: http.StatusBadRequest,
+			wantCode:   api.InvalidRequest,
+		},
+		{
+			name:       "RejectsUnsupportedBase",
+			query:      "?base=JPY&quote=MXN",
+			wantStatus: http.StatusBadRequest,
+			wantCode:   api.UnsupportedCurrency,
+		},
+		{
+			name:       "RejectsSelfPair",
+			query:      "?base=EUR&quote=EUR",
+			wantStatus: http.StatusBadRequest,
+			wantCode:   api.InvalidRequest,
+		},
+	}
+
+	h := newTestHandler(t)
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/quotes/latest"+c.query, nil)
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, c.wantStatus, rec.Code,
+				"status code for %s", c.name)
+			assert.Contains(t, rec.Header().Get("Content-Type"), "application/json",
+				"Content-Type must be application/json for %s", c.name)
+			assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"),
+				"Cache-Control must be no-store for %s", c.name)
+
+			var envelope api.Error
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope),
+				"body must unmarshal into api.Error for %s", c.name)
+			assert.Equal(t, c.wantCode, envelope.Error.Code,
+				"error code for %s", c.name)
+		})
+	}
 }

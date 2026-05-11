@@ -152,8 +152,11 @@ func run() error {
 		},
 	))
 
-	handlers := api.NewHandlers()
-	api.HandlerFromMux(handlers, mux)
+	handlers := api.NewHandlers(cfg.WhitelistCurrencies)
+	api.HandlerWithOptions(handlers, api.StdHTTPServerOptions{
+		BaseRouter:       mux,
+		ErrorHandlerFunc: api.JSONErrorHandler,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

@@ -109,10 +109,10 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] `httpmw.PanicRecover` middleware — recovers panics in HTTP handlers and goroutine wrappers; returns 500 error envelope; logs `EvPanicRecovered` with request_id, panic value, and stack — see `api-contract.md` (row 23) and `monitoring.md`
 - [x] `httpmw.Metrics` middleware — records `HTTPRequestsTotal`, `HTTPRequestDuration`, `HTTPRequestsInFlight` per handler — see `monitoring.md`
 - [x] Handler implementations satisfying generated `ServerInterface`
-- [ ] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`
+- [x] Pair validation (format → whitelist → self-pair check, three-step) — see `api-contract.md`
 - [ ] `Cache-Control` + `ETag` for `GET /quotes/:id` (per-status) and `GET /quotes/latest?base=BASE&quote=QUOTE` (`max-age=W`)
 - [ ] Conditional GET handling (`If-None-Match` → `304`)
-- [ ] Error envelope with stable `code` field
+- [x] Error envelope with stable `code` field
 - [ ] `kin-openapi` runtime validation middleware in dev/test profiles only
 - [ ] Handler tests covering the full edge case matrix from `api-contract.md`
 - [ ] Swagger UI at `/docs/`, raw spec at `/openapi.yaml` (both embedded)
