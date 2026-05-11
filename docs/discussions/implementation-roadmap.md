@@ -115,7 +115,7 @@ HTTP handlers, OpenAPI spec, contract enforcement.
 - [x] Error envelope with stable `code` field
 - [x] `kin-openapi` runtime validation middleware in dev/test profiles only
 - [ ] Handler tests covering the full edge case matrix from `api-contract.md`
-- [ ] Swagger UI at `/docs/`, raw spec at `/openapi.yaml` (both embedded)
+- [ ] Swagger UI at `/docs/`, raw spec at `/openapi.json` (both embedded)
 
 ---
 

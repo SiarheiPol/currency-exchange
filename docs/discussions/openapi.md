@@ -72,7 +72,7 @@ The generated file is **checked in**. This avoids surprises in CI environments w
 
 The service exposes the spec and a Swagger UI at:
 
-- `GET /openapi.yaml` — the raw spec (served from a `embed.FS` bundle).
+- `GET /openapi.json` — the raw spec (the JSON form embedded by `oapi-codegen`'s `embedded-spec: true`; served via `api.GetSpecJSON()`).
 - `GET /docs/` — Swagger UI (also embedded; we vendor the static assets from `swagger-api/swagger-ui`).
 
 Both are unauthenticated. They expose only public contract information — no secrets — and are useful for any internal consumer.
