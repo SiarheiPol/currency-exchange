@@ -9,10 +9,13 @@ import (
 // Config holds runtime configuration for the fake rates provider, loaded from
 // environment variables.
 type Config struct {
-	Addr         string
-	Seed         uint64
-	MonthlyQuota int
-	AccessKey    string
+	Addr           string
+	Seed           uint64
+	MonthlyQuota   int
+	AccessKey      string
+	CadenceSeconds int64
+	LatencyMinMS   int64
+	LatencyMaxMS   int64
 }
 
 const (
@@ -43,6 +46,39 @@ func Load() (*Config, error) {
 			return nil, errors.New("FAKE_MONTHLY_QUOTA must be a non-negative integer")
 		}
 		cfg.MonthlyQuota = n
+	}
+	if v := os.Getenv("FAKE_UPSTREAM_CADENCE_SECONDS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, errors.New("FAKE_UPSTREAM_CADENCE_SECONDS must be a non-negative integer")
+		}
+		if n < 0 {
+			return nil, errors.New("FAKE_UPSTREAM_CADENCE_SECONDS must be non-negative")
+		}
+		cfg.CadenceSeconds = n
+	}
+	if v := os.Getenv("FAKE_LATENCY_MIN_MS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, errors.New("FAKE_LATENCY_MIN_MS must be non-negative")
+		}
+		if n < 0 {
+			return nil, errors.New("FAKE_LATENCY_MIN_MS must be non-negative")
+		}
+		cfg.LatencyMinMS = n
+	}
+	if v := os.Getenv("FAKE_LATENCY_MAX_MS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, errors.New("FAKE_LATENCY_MAX_MS must be non-negative")
+		}
+		if n < 0 {
+			return nil, errors.New("FAKE_LATENCY_MAX_MS must be non-negative")
+		}
+		cfg.LatencyMaxMS = n
+	}
+	if cfg.LatencyMaxMS < cfg.LatencyMinMS {
+		return nil, errors.New("FAKE_LATENCY_MAX_MS must be >= FAKE_LATENCY_MIN_MS")
 	}
 	return cfg, nil
 }

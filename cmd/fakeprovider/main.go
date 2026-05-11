@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,8 +37,13 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	state := NewState(cfg.Seed, cfg.MonthlyQuota)
-	server := NewServer(state, cfg.AccessKey, clock.New())
+	state := NewState(cfg.Seed, cfg.MonthlyQuota, cfg.CadenceSeconds, clock.New())
+	latencyCfg := LatencyConfig{
+		MinMS: cfg.LatencyMinMS,
+		MaxMS: cfg.LatencyMaxMS,
+		RNG:   rand.New(rand.NewPCG(cfg.Seed+1, 0)),
+	}
+	server := NewServer(state, cfg.AccessKey, clock.New(), latencyCfg)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -48,6 +54,11 @@ func run() error {
 	serverErr := make(chan error, 1)
 	go func() {
 		obs.Logger(rootCtx).Info(obs.EvFakeproviderStarted, "addr", cfg.Addr, "seed", cfg.Seed, "quota", cfg.MonthlyQuota)
+		obs.Logger(rootCtx).Info(obs.EvFakeproviderConfig,
+			"cadence", fmt.Sprintf("%ds", cfg.CadenceSeconds),
+			"latency", fmt.Sprintf("[%d,%d]ms", cfg.LatencyMinMS, cfg.LatencyMaxMS),
+			"quota", cfg.MonthlyQuota,
+		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 			return

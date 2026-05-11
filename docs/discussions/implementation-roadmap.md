@@ -159,7 +159,7 @@ A standalone binary that imitates the apilayer-family (currencylayer). Lets revi
 
 - [x] `cmd/fakeprovider/main.go` — separate binary, listens on its own port
 - [x] HTTP-compatible with apilayer-family (currencylayer): `/live` endpoint, query params (`access_key`, `currencies`, `source`), response shape (`{success, timestamp, source, quotes}` with `success: false` error shape `{success: false, error: {code, info}}`)
-- [ ] Plan simulation via flags / env vars: monthly quota, update cadence, optional latency injection
+- [x] Plan simulation via flags / env vars: monthly quota, update cadence, optional latency injection
 - [x] Random-walk rate generation with deterministic seed (reproducible runs)
 - [x] **In-memory state only** — restart resets quota counter and current rates
 - [x] Minimal contract tests (response shape, quota counting, cadence respected)

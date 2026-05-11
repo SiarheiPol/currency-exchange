@@ -2,8 +2,11 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"currency-exchange/internal/clock"
 )
 
 // TestState_RandomWalkDeterminism verifies that two State instances seeded with
@@ -13,8 +16,8 @@ func TestState_RandomWalkDeterminism(t *testing.T) {
 	t.Parallel()
 
 	const seed = uint64(42)
-	a := NewState(seed, 100)
-	b := NewState(seed, 100)
+	a := NewState(seed, 100, 0, clock.New())
+	b := NewState(seed, 100, 0, clock.New())
 
 	p := Pair{Base: "USD", Quote: "EUR"}
 
@@ -49,7 +52,7 @@ func TestState_RandomWalkDeterminism(t *testing.T) {
 func TestState_QuotaDecrementAndExhaustion(t *testing.T) {
 	t.Parallel()
 
-	s := NewState(42, 3)
+	s := NewState(42, 3, 0, clock.New())
 
 	require.True(t, s.Consume(), "first Consume must return true")
 	require.True(t, s.Consume(), "second Consume must return true")
@@ -64,7 +67,7 @@ func TestState_QuotaDecrementAndExhaustion(t *testing.T) {
 func TestState_AllRatesForBase_FiltersSelfPair(t *testing.T) {
 	t.Parallel()
 
-	s := NewState(42, 100)
+	s := NewState(42, 100, 0, clock.New())
 	got := s.AllRatesForBase("USD", []string{"USD", "EUR", "MXN"})
 
 	_, hasSelf := got["USDUSD"]
@@ -75,4 +78,105 @@ func TestState_AllRatesForBase_FiltersSelfPair(t *testing.T) {
 
 	_, hasMXN := got["USDMXN"]
 	require.True(t, hasMXN, "USDMXN must be present in the result")
+}
+
+// TestState_Cadence_ZeroMeansAdvanceEveryCall verifies that when cadenceSeconds=0,
+// successive Rate calls without clock advancement still produce different values
+// (today's behaviour preserved).
+func TestState_Cadence_ZeroMeansAdvanceEveryCall(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	s := NewState(42, 100, 0, clk)
+
+	p := Pair{Base: "USD", Quote: "EUR"}
+
+	r1, ok1 := s.Rate(p)
+	require.True(t, ok1)
+	r2, ok2 := s.Rate(p)
+	require.True(t, ok2)
+
+	require.NotEqual(t, r1, r2, "cadence=0 must advance the walk on every call (values must differ)")
+}
+
+// TestState_Cadence_SameWindow_ReturnsCachedRate verifies that when cadenceSeconds=60
+// and the clock does not advance, two Rate calls return byte-identical float64 values.
+func TestState_Cadence_SameWindow_ReturnsCachedRate(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	s := NewState(42, 100, 60, clk)
+
+	p := Pair{Base: "USD", Quote: "EUR"}
+
+	r1, ok1 := s.Rate(p)
+	require.True(t, ok1)
+	r2, ok2 := s.Rate(p)
+	require.True(t, ok2)
+
+	require.Equal(t, r1, r2, "cadence=60 must return identical rate within the same window")
+}
+
+// TestState_Cadence_WindowBoundary_AdvancesWalk verifies that advancing the clock
+// by exactly cadenceSeconds crosses a window boundary and the next Rate call
+// returns a different value.
+func TestState_Cadence_WindowBoundary_AdvancesWalk(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	s := NewState(42, 100, 60, clk)
+
+	p := Pair{Base: "USD", Quote: "EUR"}
+
+	r1, ok1 := s.Rate(p)
+	require.True(t, ok1)
+
+	clk.Advance(60 * time.Second)
+
+	r2, ok2 := s.Rate(p)
+	require.True(t, ok2)
+
+	require.NotEqual(t, r1, r2, "advancing clock past window boundary must cause a new rate to be computed")
+}
+
+// TestState_Cadence_SkippedWindow_AdvancesOnce verifies that skipping multiple
+// windows causes exactly one walk advance (not multiple), and subsequent calls
+// within the new window return the same cached value.
+func TestState_Cadence_SkippedWindow_AdvancesOnce(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	s := NewState(42, 100, 60, clk)
+
+	p := Pair{Base: "USD", Quote: "EUR"}
+
+	r1, ok1 := s.Rate(p)
+	require.True(t, ok1)
+
+	// Skip two full windows.
+	clk.Advance(120 * time.Second)
+
+	r2, ok2 := s.Rate(p)
+	require.True(t, ok2)
+
+	r3, ok3 := s.Rate(p)
+	require.True(t, ok3)
+
+	require.NotEqual(t, r1, r2, "skipping windows must produce a new rate")
+	require.Equal(t, r2, r3, "second and third calls within the new window must return the same cached rate")
+}
+
+// TestState_Cadence_AllRatesForBase_CachedWithinWindow verifies that calling
+// AllRatesForBase twice within the same cadence window returns deeply-equal maps
+// for all requested pairs.
+func TestState_Cadence_AllRatesForBase_CachedWithinWindow(t *testing.T) {
+	t.Parallel()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	s := NewState(42, 100, 60, clk)
+
+	m1 := s.AllRatesForBase("USD", []string{"EUR", "MXN"})
+	m2 := s.AllRatesForBase("USD", []string{"EUR", "MXN"})
+
+	require.Equal(t, m1, m2, "AllRatesForBase must return identical maps within the same cadence window")
 }

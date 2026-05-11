@@ -1,23 +1,34 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"math/rand/v2"
 	"net/http"
 	"strings"
+	"time"
 
 	"currency-exchange/internal/clock"
 )
 
+// LatencyConfig configures optional artificial latency injection for the fake
+// provider. When both MinMS and MaxMS are zero, no sleep is performed.
+type LatencyConfig struct {
+	MinMS int64
+	MaxMS int64
+	RNG   *rand.Rand // math/rand/v2
+}
+
 // Server is the HTTP handler for the fake rates provider.
 type Server struct {
-	state     *State
-	accessKey string
-	clock     clock.Clock
+	state      *State
+	accessKey  string
+	latencyCfg LatencyConfig
 }
 
 // NewServer returns a new Server backed by state.
-func NewServer(state *State, accessKey string, clk clock.Clock) *Server {
-	return &Server{state: state, accessKey: accessKey, clock: clk}
+func NewServer(state *State, accessKey string, clk clock.Clock, latencyCfg LatencyConfig) *Server {
+	return &Server{state: state, accessKey: accessKey, latencyCfg: latencyCfg}
 }
 
 // ServeHTTP routes requests. Only /live is handled; everything else returns 404.
@@ -79,6 +90,13 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Latency injection — only on the success path (after auth and quota pass).
+	if d := sampleLatency(s.latencyCfg); d > 0 {
+		if !sleepWithContext(r.Context(), d) {
+			return // client cancelled
+		}
+	}
+
 	// Source default: USD.
 	source := q.Get("source")
 	if source == "" {
@@ -99,10 +117,38 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, successResponse{
 		Success:   true,
-		Timestamp: s.clock.Now().Unix(),
+		Timestamp: s.state.WindowTimestamp(),
 		Source:    source,
 		Quotes:    quotes,
 	})
+}
+
+// sampleLatency returns a sleep duration based on cfg. Returns 0 when both
+// MinMS and MaxMS are zero.
+func sampleLatency(cfg LatencyConfig) time.Duration {
+	if cfg.MinMS == 0 && cfg.MaxMS == 0 {
+		return 0
+	}
+	if cfg.MinMS == cfg.MaxMS {
+		return time.Duration(cfg.MinMS) * time.Millisecond
+	}
+	// Uniform in [min, max], inclusive on both ends.
+	span := cfg.MaxMS - cfg.MinMS + 1
+	n := cfg.MinMS + cfg.RNG.Int64N(span)
+	return time.Duration(n) * time.Millisecond
+}
+
+// sleepWithContext blocks for d or until ctx is done. Returns true if the full
+// duration elapsed, false if the context was cancelled first.
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

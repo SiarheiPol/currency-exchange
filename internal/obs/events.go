@@ -33,4 +33,5 @@ const (
 	EvHTTPShutdownFailed          = "http shutdown failed"
 	EvWorkerStopTimeout           = "worker did not stop within 10s"
 	EvWorkerConfigDerived         = "derived worker config"
+	EvFakeproviderConfig          = "fake provider config"
 )
