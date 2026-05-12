@@ -49,7 +49,7 @@ Example:
 
 ### What we log
 
-- **HTTP request boundaries.** One line per request, at `info`. Method, path, status, duration. Server-internal errors at `error`.
+- **HTTP request boundaries.** One line per request, at `debug` (per-request `info` logging at multi-kRPS workloads becomes load-bearing — ~5–10 μs CPU and ~250 B stdout per call. Aggregate signal lives in `http_requests_total` / `http_request_duration_seconds`. Operators flip `LOG_LEVEL=debug` to surface individual boundaries when debugging). Method, path, status, duration. Server-internal errors at `error` (emitted by `httpmw.PanicRecover` and the OpenAPI validation middleware, not by the boundary log).
 - **Job lifecycle.** Reserve, complete, reschedule, fail. One line per transition at `info`. Full payload of failures at `warn`/`error`. Structured fields `base` and `quote` replace the former single `currency` field.
 - **Scheduler ticks.** One line per tick at `debug` (high cardinality if `T` is short).
 - **Upstream calls.** One line per HTTP call at `info` with provider name, base currency, quote currency list for that base, duration, and status. One log line per base currency (not one per pair). Failures at `warn`.

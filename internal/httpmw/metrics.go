@@ -31,18 +31,22 @@ func Metrics(next http.Handler) http.Handler {
 		obs.HTTPInFlightRequests.Inc()
 		defer obs.HTTPInFlightRequests.Dec()
 
+		obs.LogHTTPRequestReceived(r.Context(), r.Method, r.URL.Path)
+
 		start := time.Now()
 		rw := &statusCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
+		elapsed := time.Since(start)
+
+		obs.LogHTTPRequestCompleted(r.Context(), r.Method, r.URL.Path, rw.status, elapsed)
 
 		// r.Pattern is set by http.ServeMux inside next.ServeHTTP. If it is
 		// still empty after the call, no mux pattern was matched — skip
-		// recording to avoid a degenerate empty-path label.
+		// metric recording to avoid a degenerate empty-path label. Logs above
+		// still fire for unmatched routes so 404s are visible.
 		if r.Pattern == "" {
 			return
 		}
-
-		elapsed := time.Since(start)
 		obs.HTTPRequestsTotal.WithLabelValues(r.Method, r.Pattern, strconv.Itoa(rw.status)).Inc()
 		obs.HTTPRequestDurationSeconds.WithLabelValues(r.Method, r.Pattern).Observe(elapsed.Seconds())
 	})

@@ -91,17 +91,22 @@ func LogUpstreamCallFinished(ctx context.Context, provider string, currencies []
 	Logger(ctx).LogAttrs(ctx, level, EvUpstreamCallFinished, attrs...)
 }
 
-// LogHTTPRequestReceived logs an incoming HTTP request.
+// LogHTTPRequestReceived logs an incoming HTTP request at DEBUG level.
+// Per-request logging at INFO would add ~5-10 μs CPU and ~250 B stdout per
+// call, which becomes a load-bearing cost at multi-kRPS workloads; aggregate
+// signal lives in http_requests_total / http_request_duration_seconds. Use
+// LOG_LEVEL=debug to surface individual request boundaries.
 func LogHTTPRequestReceived(ctx context.Context, method, path string) {
-	Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvHTTPRequestReceived,
+	Logger(ctx).LogAttrs(ctx, slog.LevelDebug, EvHTTPRequestReceived,
 		slog.String("method", method),
 		slog.String("path", path),
 	)
 }
 
-// LogHTTPRequestCompleted logs the completion of an HTTP request.
+// LogHTTPRequestCompleted logs the completion of an HTTP request at DEBUG
+// level. See LogHTTPRequestReceived for the level rationale.
 func LogHTTPRequestCompleted(ctx context.Context, method, path string, statusCode int, duration time.Duration) {
-	Logger(ctx).LogAttrs(ctx, slog.LevelInfo, EvHTTPRequestCompleted,
+	Logger(ctx).LogAttrs(ctx, slog.LevelDebug, EvHTTPRequestCompleted,
 		slog.String("method", method),
 		slog.String("path", path),
 		slog.Int("status_code", statusCode),

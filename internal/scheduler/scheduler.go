@@ -100,6 +100,11 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 			return err
 		}
 	}
+	pairLabels := make([]string, len(s.pairs))
+	for i, p := range s.pairs {
+		pairLabels[i] = p.Base + "/" + p.Quote
+	}
+	obs.LogSchedulerTick(ctx, pairLabels)
 	s.lastTickMu.Lock()
 	s.lastTick = now
 	s.lastTickMu.Unlock()
