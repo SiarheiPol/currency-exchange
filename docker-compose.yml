@@ -53,17 +53,24 @@ services:
       fakeprovider:
         condition: service_started
     environment:
+      # HTTP_ADDR and DB_DSN are network-internal; they intentionally do
+      # NOT interpolate from .env (the host port is mapped via `ports:`
+      # below, and DB_DSN must reference the compose-internal hostname).
       HTTP_ADDR: ":8080"
       DB_DSN: postgres://postgres:postgres@postgres:5432/quotes?sslmode=disable
+      # All other server env vars interpolate from the shell or .env so
+      # operators can tune them without editing compose.yml. Defaults
+      # mirror .env.example so a fresh checkout works without overrides.
+      DB_POOL_MAX_CONNS: "${DB_POOL_MAX_CONNS:-25}"
       PROVIDER_BASE_URL: ${PROVIDER_BASE_URL:-http://fakeprovider:9090}
       PROVIDER_API_KEY: ${PROVIDER_API_KEY:-dev-key}
-      APP_ENV: development
-      LOG_LEVEL: info
-      WHITELIST_CURRENCIES: USD,EUR,MXN
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      WHITELIST_CURRENCIES: ${WHITELIST_CURRENCIES:-USD,EUR,MXN}
       SCHEDULER_TICK_SECONDS: "${SCHEDULER_TICK_SECONDS:-30}"
       COALESCING_WINDOW_SECONDS: "${COALESCING_WINDOW_SECONDS:-30}"
-      WORKER_COUNT: "1"
-      REFRESH_MAX_LATENCY_MS: "2000"
+      WORKER_COUNT: "${WORKER_COUNT:-1}"
+      REFRESH_MAX_LATENCY_MS: "${REFRESH_MAX_LATENCY_MS:-2000}"
     ports: ["8080:8080"]
 
   prometheus:
