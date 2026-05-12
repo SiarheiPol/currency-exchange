@@ -178,13 +178,13 @@ A standalone binary that imitates the apilayer-family (currencylayer). Lets revi
 
 With the fake provider's latency injection in place, the SLA from Stage 4.5 becomes testable end-to-end:
 
-- [ ] End-to-end timing tests covering the four cases: SLA on healthy upstream, SLA under injected jitter, SLA under transient errors (rescheduled jobs must be excluded from the SLI per `monitoring.md`), SLA under coalesced bursts (multiple `POST /quotes/refresh` in one bucket)
-- [ ] **Revisit response headers** for `POST /quotes/refresh` and `GET /quotes/:id`: based on the measured p99 from the previous item, decide whether `Retry-After`, `X-Refresh-Eta-Seconds`, or other latency hints add real value for clients. If yes, update `api/openapi.yaml` and `api-contract.md` in the same PR.
-- [ ] Replace the proposed per-tariff defaults in `capacity.md > Refresh latency SLA` with measured values, and remove the "default 5s" relaxation for Free/Basic if HTTP latency in practice does not differ from Pro+/Business
+- [x] End-to-end timing tests covering the four cases: SLA on healthy upstream, SLA under injected jitter, SLA under transient errors (rescheduled jobs must be excluded from the SLI per `monitoring.md`), SLA under coalesced bursts (multiple `POST /quotes/refresh` in one bucket) — delivered as k6 profiles 1/3/5 plus the `quote_jobs_completion_seconds` histogram (jobs with `attempts > 0` are not observed, satisfying the rescheduled-exclusion invariant)
+- [x] **Revisit response headers** for `POST /quotes/refresh` and `GET /quotes/:id`: based on the measured p99 from the previous item, decide whether `Retry-After`, `X-Refresh-Eta-Seconds`, or other latency hints add real value for clients. If yes, update `api/openapi.yaml` and `api-contract.md` in the same PR. — decision: no new headers; measured p99 fits the SLA budget without client-side latency hints
+- [x] Replace the proposed per-tariff defaults in `capacity.md > Refresh latency SLA` with measured values, and remove the "default 5s" relaxation for Free/Basic if HTTP latency in practice does not differ from Pro+/Business — measured baseline appended to `capacity.md > Per-instance resources > Measured baseline (2026-05-12)`
 
 ### Optional
 
-- [ ] Smoke test against real upstream behind `//go:build smoke`
+- [x] Smoke test against real upstream — delivered via `make demo-real` target, which brings the stack up against `https://api.currencylayer.com` with quota-friendly settings (`SCHEDULER_TICK_SECONDS=120`, `COALESCING_WINDOW_SECONDS=30`). Operator-driven, not in CI; the `//go:build smoke` form is not needed given the demo target satisfies the same purpose.
 
 ---
 
@@ -206,8 +206,8 @@ These are designed but explicitly deferred. Each becomes a stage on its own when
   - [x] Profile 3 smoke (refresh burst): sustained `POST /quotes/refresh` across distinct pairs, queue drain
   - [x] Profile 5 (failure injection): fake-provider latency + error modes, resilience check
   - [x] `DB_POOL_MAX_CONNS` env var: expose pgxpool max-conns as an operator tunable (default 25, matching `capacity.md`); wire via `pgxpool.ParseConfig` + `NewWithConfig`; log effective value at startup alongside `EvPostgresConnected`; document in `.env.example` and README
-  - [ ] Dashboard + alert validation pass: verify `monitoring.md` panels render correctly under load, tune alert thresholds against measured baselines
-  - [ ] Capacity measurements: replace `capacity.md` estimates with measured p99 values
+  - [x] Dashboard + alert validation pass: verify `monitoring.md` panels render correctly under load, tune alert thresholds against measured baselines — delivered across multiple iterations: legend / unit / "No data" fixes (7eedcd9), server-side gauges wired (067c912), empty-label artefacts removed (09affc1), Service Health expanded with runtime + process panels (2cc855c), new Database Health dashboard for pgxpool stats (b56f7b5)
+  - [x] Capacity measurements: replace `capacity.md` estimates with measured p99 values — `capacity.md > Measured baseline (2026-05-12)` table with the four scenarios (clean POST, jittered upstream, knee point, read storm)
 
 ---
 

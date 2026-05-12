@@ -175,6 +175,21 @@ Adjust based on observed `container_memory_working_set_bytes` and `container_cpu
 
 This profile assumes the monolithic `cmd/server` process (api + worker + scheduler in one binary, as goroutines). Splitting roles into separate processes is not the default deployment shape — see `scaling.md > Stage B > Scheduler in multi-instance` for when that becomes worth considering.
 
+### Measured baseline (2026-05-12)
+
+First end-to-end load tests captured the following on a dev workstation (16-core, 37 GB RAM, full compose stack — server + Postgres + fakeprovider + Prometheus + Grafana) using `make loadtest-burst`/`loadtest-read` (k6 profiles 2 and 3):
+
+| Scenario | RPS sustained | HTTP p95 | Notes |
+|---|---|---|---|
+| `POST /quotes/refresh`, clean | **5 000** | **13 ms** | no upstream-latency injection; `DB_POOL_MAX_CONNS=25` (post-fix), `WORKER_COUNT=1`; ~0 dropped iters; CPU = server 2.5 / postgres 2 / k6 2.6 cores |
+| `POST /quotes/refresh`, jittered upstream | ~7 000 | **194 ms** at 2 min, **371 ms** at 5 min | `FAKE_LATENCY=100–500 ms`, `FAKE_UPSTREAM_CADENCE=5 s`; upstream itself sees <0.1 req/s (coalescing) — saturation came from pgxpool acquire-wait + Postgres dedup-index contention, not upstream |
+| `POST /quotes/refresh`, knee point | ~10–12 k | starts climbing >200 ms | clear inflection at ~10 000 RPS; above that latency grows ~16× per +20 % RPS |
+| `GET /quotes/latest`, read storm (profile 2) | 5 000 | <50 ms | cache-served path; Cache-Control + ETag verified on every response |
+
+What the numbers replace: the previous prose estimate "1000 RPS per core, 25-pool default" was a placeholder. Measured numbers show the single-instance ceiling is closer to **2 000 RPS per CPU core on the write path** and **>5 000 RPS per core on the read path** for our specific shape (JSON marshal + dedup upsert + cache lookup). The default `DB_POOL_MAX_CONNS=25` from the same iteration covers the load up to the measured knee; raising it without first raising `WORKER_COUNT` shows diminishing returns because the queue is single-worker-bound.
+
+What `capacity.md` thresholds in `Worker pool K` were validated by: scenario "knee point" above corresponds to the `quote_jobs_pending_count > whitelist_size × 2 for > 5 min` row — empty/cancelled acquires (visible on the Database Health dashboard) appear before pending count crosses that threshold, so the trigger fires earlier than expected. Operators on a similar workload should bump `K` to 2 before the documented trigger.
+
 ## Log volume
 
 From the discussion in `monitoring.md`: ~250 B per JSON log line, ~5 lines per request.

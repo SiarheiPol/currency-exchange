@@ -8,6 +8,17 @@ A REST service that returns current exchange rates between whitelisted currency 
 - Docker (for building images, running Postgres locally)
 - PostgreSQL 16 (provided via Docker for local development)
 
+## API
+
+The OpenAPI spec is at `api/openapi.yaml`. Main endpoints:
+
+- `GET /quotes/latest?base=USD&quote=EUR` — latest cached quote.
+- `GET /quotes/{id}` — quote by ID.
+- `POST /quotes/refresh` — request a fresh upstream fetch (async, coalesced).
+- `GET /healthz` — liveness probe.
+- `GET /readyz` — readiness probe (DB ping + scheduler + worker checks).
+- `GET /metrics` — Prometheus metrics.
+
 ## Quick start
 
 Two one-command modes are provided. Pick whichever fits.
@@ -138,17 +149,6 @@ All configuration is via environment variables. See `.env.example` for the full 
 | `FAKE_UPSTREAM_CADENCE_SECONDS` | `0` | Cache rates per window (0 = advance every call) |
 | `FAKE_LATENCY_MIN_MS` | `0` | Lower bound for injected latency |
 | `FAKE_LATENCY_MAX_MS` | `0` | Upper bound; must be >= MIN |
-
-## API
-
-The OpenAPI spec is at `api/openapi.yaml`. Main endpoints:
-
-- `GET /quotes/latest?base=USD&quote=EUR` — latest cached quote.
-- `GET /quotes/{id}` — quote by ID.
-- `POST /quotes/refresh` — request a fresh upstream fetch (async, coalesced).
-- `GET /healthz` — liveness probe.
-- `GET /readyz` — readiness probe (DB ping + scheduler + worker checks).
-- `GET /metrics` — Prometheus metrics.
 
 ## Testing
 
