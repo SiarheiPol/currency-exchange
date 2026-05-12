@@ -45,14 +45,22 @@ Three environment variables can be overridden — all profile targets (1, 2, 3, 
 | `LOADTEST_RATE` | profile-specific (50/500/100/25) | Target requests per second. |
 | `LOADTEST_VUS` | profile-specific (50/100/50/50) | k6 virtual-user pool size. `maxVUs` is auto-derived as `LOADTEST_VUS × 2` with a floor at the profile default. |
 
-Pass overrides via `-e` to the `run` invocation:
+Two ways to pass overrides:
 
 ```bash
-# High-rate extended run for profile 2
+# (a) Shell prefix — docker-compose.yml interpolates ${LOADTEST_*} into
+#     the k6 service's environment block, so unprefixed `docker compose run`
+#     picks them up automatically. Simplest form.
+LOADTEST_RATE=5000 LOADTEST_VUS=1000 LOADTEST_DURATION=5m \
+  docker compose --profile loadtest run --rm k6 run /scripts/profile2.js
+
+# (b) Explicit -e flags (equivalent; works regardless of compose interpolation).
 docker compose --profile loadtest run --rm \
   -e LOADTEST_RATE=5000 -e LOADTEST_VUS=1000 -e LOADTEST_DURATION=5m \
   k6 run /scripts/profile2.js
 ```
+
+There are no per-profile `make` targets; `make demo` is the only canned scenario (it uses form (b) internally to drive profile 2 at 5000 RPS for 2 minutes).
 
 #### When to raise `LOADTEST_VUS`
 
@@ -67,7 +75,8 @@ vus...............: 99      max=100         ← capped at maxVUs
 Rule of thumb: `LOADTEST_VUS ≥ target_rate × expected_p95_seconds × 2`. For 20 000 RPS at a ~12 ms p95, set `LOADTEST_VUS=1000`. Each VU costs ~1 MB RAM, so pools up to a few thousand are fine.
 
 ```bash
-LOADTEST_RATE=20000 LOADTEST_VUS=1000 LOADTEST_DURATION=120s make loadtest-burst
+LOADTEST_RATE=20000 LOADTEST_VUS=1000 LOADTEST_DURATION=120s \
+  docker compose --profile loadtest run --rm k6 run /scripts/profile3.js
 ```
 
 ## Profiles

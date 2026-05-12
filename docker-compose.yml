@@ -109,6 +109,14 @@ services:
       - server
       - prometheus
       - grafana
+    # Forward LOADTEST_* env vars from the shell (or .env) into the k6
+    # container so `LOADTEST_RATE=7000 docker compose run --rm k6 ...` works
+    # without explicit -e flags. Unset vars resolve to empty strings; the JS
+    # scripts fall back to their per-profile defaults via `__ENV.X || "..."`.
+    environment:
+      LOADTEST_DURATION: ${LOADTEST_DURATION:-}
+      LOADTEST_RATE: ${LOADTEST_RATE:-}
+      LOADTEST_VUS: ${LOADTEST_VUS:-}
     volumes:
       - ./loadtest:/scripts:ro
     networks:

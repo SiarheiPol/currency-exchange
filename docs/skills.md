@@ -51,11 +51,9 @@ Review files land in `docs/reviews/<date>-<model>-<type>.md`. See `docs/reviews/
 | `make generate` | `go generate ./...` (regenerates `oapi_gen.go` and similar) | after editing `api/openapi.yaml` |
 | `make build` | `go build -o bin/server ./cmd/server` — produces a release binary in `bin/` (gitignored) | when you want a built artifact (smoke testing, profiling) |
 | `make run` | `go run ./cmd/server` — assumes env vars are already exported (use `scripts/dev-run.sh` to source `.env` first) | local manual testing |
-| `make loadtest` | run k6 baseline scenario against the local stack (Stage 6) | when validating capacity changes |
-| `make loadtest-burst` | k6 refresh-burst scenario (Stage 6) | stress-testing the queue |
-| `make loadtest-fail` | k6 failure-injection scenario via fake provider (Stage 6) | validating retry / circuit logic |
-
-Targets above marked **(Stage 6)** become available once the load-testing setup lands per `discussions/implementation-roadmap.md`.
+| `make demo` | bring up the full stack with business-like settings and run k6 profile 2 at 5000 RPS for 2 minutes (one command) | quick end-to-end demo / regression check |
+| `make demo-real` | bring up the stack against the real apilayer upstream (requires `PROVIDER_API_KEY` in `.env`); no load test | smoke against real provider |
+| `docker compose --profile loadtest run --rm k6 run /scripts/profileN.js` | ad-hoc k6 scenario against an already-running stack (N ∈ 1..5; override via `LOADTEST_RATE` / `LOADTEST_VUS` / `LOADTEST_DURATION`) | stress-testing the queue, refresh burst, failure injection |
 
 ## Adding a new shell skill
 

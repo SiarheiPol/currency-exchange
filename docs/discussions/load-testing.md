@@ -130,15 +130,24 @@ Smoke tier catches obvious regressions (a PR that breaks dedup will fail the coa
 
 ## Local development
 
-Developers can run load tests locally:
+Developers run load tests locally via the `loadtest` Compose profile. There is no per-profile `make` target — the canonical entry points are:
 
-```
-make loadtest         # profile 1, baseline
-make loadtest-burst   # profile 3, refresh burst
-make loadtest-fail    # profile 5, failure injection
+```bash
+# Canned demo: bring up the stack with business-like settings and run
+# profile 2 at 5000 RPS for 2 minutes (one command).
+make demo
+
+# Ad-hoc per-profile runs against an already-running stack:
+docker compose --profile loadtest run --rm k6 run /scripts/profile1.js  # baseline
+docker compose --profile loadtest run --rm k6 run /scripts/profile3.js  # refresh burst
+docker compose --profile loadtest run --rm k6 run /scripts/profile5.js  # failure injection
+
+# Override rate / VUs / duration via shell env (compose interpolates):
+LOADTEST_RATE=20000 LOADTEST_VUS=1500 LOADTEST_DURATION=120s \
+  docker compose --profile loadtest run --rm k6 run /scripts/profile3.js
 ```
 
-These spin up the full stack via `docker-compose.yml` (service + Postgres + fake provider + Prometheus + Grafana) and run the corresponding k6 scenario against it. Results in stdout plus Grafana dashboards available at `localhost:3000`.
+The k6 container shares the Compose default network so it reaches the server at `http://server:8080` without host port mapping. Results print to stdout; Grafana dashboards are available at `localhost:3000`.
 
 ## AI-agent considerations
 

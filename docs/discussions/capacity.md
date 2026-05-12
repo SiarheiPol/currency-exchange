@@ -177,7 +177,7 @@ This profile assumes the monolithic `cmd/server` process (api + worker + schedul
 
 ### Measured baseline (2026-05-12)
 
-First end-to-end load tests captured the following on a dev workstation (16-core, 37 GB RAM, full compose stack — server + Postgres + fakeprovider + Prometheus + Grafana) using `make loadtest-burst`/`loadtest-read` (k6 profiles 2 and 3):
+First end-to-end load tests captured the following on a dev workstation (16-core, 37 GB RAM, full compose stack — server + Postgres + fakeprovider + Prometheus + Grafana) via `docker compose --profile loadtest run --rm k6 run /scripts/profile{2,3}.js`:
 
 | Scenario | RPS sustained | HTTP p95 | Notes |
 |---|---|---|---|

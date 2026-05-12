@@ -84,7 +84,7 @@ CI runs the same `make check`. Other targets:
 - `make lint` — linters only.
 - `make generate` — codegen only.
 - `make run` — start the service locally against `docker-compose` dependencies.
-- `make loadtest` — k6 baseline scenario (Stage 6).
+- `make demo` — full stack + k6 profile 2 at 5000 RPS for 2 minutes. Ad-hoc per-profile runs go through `docker compose --profile loadtest run --rm k6 run /scripts/profileN.js`.
 
 ## Generated Code
 
