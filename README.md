@@ -10,11 +10,32 @@ A REST service that returns current exchange rates between whitelisted currency 
 
 ## Quick start
 
+Two one-command modes are provided. Pick whichever fits.
+
+### Demo mode (fake provider + load test)
+
 ```bash
-docker compose up -d
+make demo
 ```
 
-Wait for the stack to become healthy (~15 seconds), then visit:
+Brings up the full stack against the local fake rates provider with business-like settings (`SCHEDULER_TICK_SECONDS=30`, `COALESCING_WINDOW_SECONDS=5`, injected upstream latency `100–500 ms`), waits for `/readyz`, and runs the read-storm load profile at **5000 RPS for 2 minutes** against it. The stack stays running after k6 exits so you can inspect Grafana.
+
+### Real-upstream mode (apilayer, no load test)
+
+```bash
+# 1) Put your apilayer key into .env
+cp .env.example .env
+$EDITOR .env   # set PROVIDER_API_KEY=...
+
+# 2) Bring the stack up against the real provider
+make demo-real
+```
+
+`SCHEDULER_TICK_SECONDS=120` and `COALESCING_WINDOW_SECONDS=30` — ~30 upstream-fetch ticks per hour at quiet traffic. **Check your provider quota before leaving this running.** No load test is started.
+
+### Endpoints
+
+After either command:
 
 - Service: `http://localhost:8080/healthz`
 - Grafana: `http://localhost:3000` — login `admin/admin`
@@ -26,6 +47,14 @@ Stop the stack:
 ```bash
 docker compose down       # keep DB volume
 docker compose down -v    # also delete DB and Prometheus data
+```
+
+### Plain stack (no preset)
+
+If you want defaults without the demo presets:
+
+```bash
+docker compose up -d
 ```
 
 ### Configuration overrides
@@ -132,15 +161,7 @@ make coverage-html       # writes coverage.html
 
 ### Load tests (k6)
 
-Smoke-tier load tests live in `loadtest/`. They run inside the Compose stack via the `loadtest` profile (no host k6 install required):
-
-```bash
-make loadtest                            # profile 1: sustained 50 RPS, 30s
-make loadtest-coalesce                   # profile 4: 100-VU burst, coalescing assertion
-LOADTEST_DURATION=30m make loadtest      # full-tier override
-```
-
-The k6 service brings up the entire stack on first run (postgres + migrate + fakeprovider + server + prometheus + grafana). Open Grafana at `http://localhost:3000` during or after a run to watch the dashboards. See [`loadtest/README.md`](loadtest/README.md) and [`docs/discussions/load-testing.md`](docs/discussions/load-testing.md) for profile details and the full roadmap.
+Smoke-tier load tests live in `loadtest/`. They run inside the Compose stack via the `loadtest` profile (no host k6 install required). `make demo` runs profile 2 at 5000 RPS as a one-command demo; for individual profiles and overrides see [`loadtest/README.md`](loadtest/README.md) and [`docs/discussions/load-testing.md`](docs/discussions/load-testing.md).
 
 ## Migrations
 

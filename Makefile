@@ -4,7 +4,7 @@
         migrate-up migrate-down \
         docker-build-server docker-build-fakeprovider \
         compose-validate \
-        loadtest loadtest-coalesce loadtest-read loadtest-burst loadtest-fail
+        demo demo-real
 
 COVERAGE_FILE ?= coverage.out
 
@@ -66,36 +66,35 @@ compose-validate:
 	docker run --rm --entrypoint="" -v "$(PWD)/deploy/prometheus:/etc/prometheus:ro" \
 		prom/prometheus:v2.55.1 promtool check config /etc/prometheus/prometheus.yml
 
-loadtest:
+demo:
+	@echo "Starting demo stack: fake provider, business-like settings, then 5000 RPS read storm."
+	FAKE_LATENCY_MIN_MS=100 FAKE_LATENCY_MAX_MS=500 \
+	SCHEDULER_TICK_SECONDS=30 COALESCING_WINDOW_SECONDS=5 \
+	docker compose up -d
+	@echo "Waiting for /readyz..."
+	@for i in $$(seq 1 60); do \
+		if curl -sf http://localhost:8080/readyz > /dev/null 2>&1; then \
+			echo "Server ready."; break; \
+		fi; \
+		sleep 1; \
+	done
 	docker compose --profile loadtest run --rm \
-		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
-		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
-		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
-		k6 run /scripts/profile1.js
-
-loadtest-coalesce:
-	docker compose --profile loadtest run --rm \
-		k6 run /scripts/profile4.js
-
-loadtest-read:
-	docker compose --profile loadtest run --rm \
-		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
-		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
-		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
+		-e LOADTEST_RATE=5000 -e LOADTEST_VUS=1000 -e LOADTEST_DURATION=2m \
 		k6 run /scripts/profile2.js
+	@echo ""
+	@echo "Demo stack is still running. Grafana: http://localhost:3000 (admin/admin)."
+	@echo "Stop with: docker compose down (or 'down -v' to drop volumes)."
 
-loadtest-burst:
-	docker compose --profile loadtest run --rm \
-		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
-		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
-		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
-		k6 run /scripts/profile3.js
-
-loadtest-fail:
-	@echo "Reminder: start the stack with FAKE_LATENCY_MIN_MS and FAKE_LATENCY_MAX_MS to activate latency injection."
-	@echo "Example: FAKE_LATENCY_MIN_MS=500 FAKE_LATENCY_MAX_MS=2000 docker compose up -d"
-	docker compose --profile loadtest run --rm \
-		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
-		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
-		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
-		k6 run /scripts/profile5.js
+demo-real:
+	@echo "================================================================"
+	@echo "WARNING: starting with REAL upstream (currencylayer)."
+	@echo "  SCHEDULER_TICK_SECONDS=120 → up to ~30 ticks/hour."
+	@echo "  Check your provider quota before leaving this running."
+	@echo "  Requires PROVIDER_API_KEY in .env."
+	@echo "================================================================"
+	PROVIDER_BASE_URL=https://api.currencylayer.com \
+	SCHEDULER_TICK_SECONDS=120 COALESCING_WINDOW_SECONDS=30 \
+	docker compose up -d
+	@echo ""
+	@echo "Stack started. Service: http://localhost:8080/healthz  Grafana: http://localhost:3000"
+	@echo "Stop with: docker compose down"

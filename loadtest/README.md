@@ -12,19 +12,28 @@ docker compose up -d
 
 Wait for all services to become healthy (check with `docker compose ps`).
 
+> **Tip:** `make demo` brings the stack up with business-like settings *and* runs profile 2 at 5000 RPS in one go. Use that for a quick all-in-one demo; the rest of this README is for running individual profiles manually.
+
 ## Running the tests
 
-```bash
-make loadtest             # profile 1, 30s default
-make loadtest-coalesce    # profile 4
-make loadtest-read        # profile 2
-make loadtest-burst       # profile 3
-make loadtest-fail        # profile 5 (baseline; see below for latency injection)
-LOADTEST_DURATION=10s make loadtest    # override duration
-LOADTEST_DURATION=30m make loadtest    # full tier
-```
-
 The k6 container is started on demand under the `loadtest` compose profile and removed automatically after the run (`--rm`). No k6 installation on the host is required.
+
+```bash
+# Profile 1 — sustained 50 RPS, 30s
+docker compose --profile loadtest run --rm k6 run /scripts/profile1.js
+
+# Profile 2 — read storm, 500 RPS default
+docker compose --profile loadtest run --rm k6 run /scripts/profile2.js
+
+# Profile 3 — refresh burst, 100 RPS default
+docker compose --profile loadtest run --rm k6 run /scripts/profile3.js
+
+# Profile 4 — coalescing stress (iteration-count based; ignores rate/duration overrides)
+docker compose --profile loadtest run --rm k6 run /scripts/profile4.js
+
+# Profile 5 — failure injection baseline (zero latency by default)
+docker compose --profile loadtest run --rm k6 run /scripts/profile5.js
+```
 
 ### Running with overrides
 
@@ -36,10 +45,13 @@ Three environment variables can be overridden — all profile targets (1, 2, 3, 
 | `LOADTEST_RATE` | profile-specific (50/500/100/25) | Target requests per second. |
 | `LOADTEST_VUS` | profile-specific (50/100/50/50) | k6 virtual-user pool size. `maxVUs` is auto-derived as `LOADTEST_VUS × 2` with a floor at the profile default. |
 
-Example showing a high-rate extended run for profile 2:
+Pass overrides via `-e` to the `run` invocation:
 
 ```bash
-LOADTEST_RATE=5000 LOADTEST_DURATION=5m make loadtest-read
+# High-rate extended run for profile 2
+docker compose --profile loadtest run --rm \
+  -e LOADTEST_RATE=5000 -e LOADTEST_VUS=1000 -e LOADTEST_DURATION=5m \
+  k6 run /scripts/profile2.js
 ```
 
 #### When to raise `LOADTEST_VUS`
@@ -115,7 +127,7 @@ Sends a 80/20 mix of `GET /quotes/latest` and `POST /quotes/refresh` at 25 req/s
 
 ```bash
 FAKE_LATENCY_MIN_MS=500 FAKE_LATENCY_MAX_MS=2000 docker compose up -d
-make loadtest-fail
+docker compose --profile loadtest run --rm k6 run /scripts/profile5.js
 ```
 
 Thresholds that must pass (both with and without injection):
