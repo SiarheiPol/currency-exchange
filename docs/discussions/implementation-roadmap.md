@@ -205,6 +205,7 @@ These are designed but explicitly deferred. Each becomes a stage on its own when
   - [x] Profile 2 smoke (read storm): `GET /quotes/latest` at high RPS, scalability check
   - [x] Profile 3 smoke (refresh burst): sustained `POST /quotes/refresh` across distinct pairs, queue drain
   - [x] Profile 5 (failure injection): fake-provider latency + error modes, resilience check
+  - [ ] `DB_POOL_MAX_CONNS` env var: expose pgxpool max-conns as an operator tunable (default 25, matching `capacity.md`); wire via `pgxpool.ParseConfig` + `NewWithConfig`; log effective value at startup alongside `EvPostgresConnected`; document in `.env.example` and README
   - [ ] Dashboard + alert validation pass: verify `monitoring.md` panels render correctly under load, tune alert thresholds against measured baselines
   - [ ] Capacity measurements: replace `capacity.md` estimates with measured p99 values
 
