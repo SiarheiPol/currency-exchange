@@ -1,0 +1,128 @@
+{
+  "uid": "db-health",
+  "title": "Database Health",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Pool Connections",
+      "description": "pgxpool connection state. total = acquired + idle. max is the configured ceiling. Steady-state idle ≈ total under low load; total approaching max under load is normal. acquired pegged at max means the pool is saturated — queries are queuing.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "db_pool_total_conns{job=\"server\"}",
+          "refId": "A",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "db_pool_acquired_conns{job=\"server\"}",
+          "refId": "B",
+          "legendFormat": "acquired"
+        },
+        {
+          "expr": "db_pool_idle_conns{job=\"server\"}",
+          "refId": "C",
+          "legendFormat": "idle"
+        },
+        {
+          "expr": "db_pool_max_conns{job=\"server\"}",
+          "refId": "D",
+          "legendFormat": "max"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Acquire Rate",
+      "description": "Successful pool.Acquire() calls per second. Tracks transaction throughput on the server.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(db_pool_acquires_total{job=\"server\"}[1m])",
+          "refId": "A",
+          "legendFormat": "acquires/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Acquire Wait Time Rate",
+      "description": "rate(db_pool_acquire_wait_seconds_total[1m]) — seconds-of-wait per second. Value 0 means acquires return immediately. Value 1 means callers are spending 100% of their time waiting on the pool (one full equivalent worker-second of wait per wall-second). Sustained nonzero values signal pool exhaustion; raise pool size or shorten transactions.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 4
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(db_pool_acquire_wait_seconds_total{job=\"server\"}[1m])",
+          "refId": "A",
+          "legendFormat": "wait-s/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Empty / Cancelled Acquires",
+      "description": "Acquires that had to wait for a new connection (empty pool) or were cancelled (caller context expired before acquire returned). Both are backpressure indicators; cancelled in particular means clients are giving up waiting.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(db_pool_empty_acquires_total{job=\"server\"}[1m])",
+          "refId": "A",
+          "legendFormat": "empty/s"
+        },
+        {
+          "expr": "rate(db_pool_cancelled_acquires_total{job=\"server\"}[1m])",
+          "refId": "B",
+          "legendFormat": "cancelled/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "New Connections Rate",
+      "description": "rate(db_pool_new_conns_total[1m]) — connections constructed per second. After warmup this should be near 0; sustained nonzero means the pool is churning (connections dying or being recycled too quickly).",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(db_pool_new_conns_total{job=\"server\"}[1m])",
+          "refId": "A",
+          "legendFormat": "new/s"
+        }
+      ]
+    }
+  ]
+}
