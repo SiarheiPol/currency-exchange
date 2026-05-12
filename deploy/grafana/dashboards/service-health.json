@@ -93,6 +93,132 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Goroutines",
+      "description": "Current goroutine count for the server process. A steadily climbing line is a leak signal. Filtered to job=server to exclude Prometheus's own goroutines.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "go_goroutines{job=\"server\"}",
+          "refId": "A",
+          "legendFormat": "goroutines"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Heap Allocated",
+      "description": "Bytes currently allocated by Go on the heap (go_memstats_alloc_bytes). Sawtooth pattern around GC is normal; a rising baseline signals a leak.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "expr": "go_memstats_alloc_bytes{job=\"server\"}",
+          "refId": "A",
+          "legendFormat": "heap alloc"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Resident Memory (RSS)",
+      "description": "Process RSS (process_resident_memory_bytes). Includes Go heap + runtime + stacks + cgo. Compare against the container memory limit.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"server\"}",
+          "refId": "A",
+          "legendFormat": "RSS"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "CPU Cores In Use",
+      "description": "rate(process_cpu_seconds_total[1m]) — value of N means N CPU cores are fully utilised by the server process. Multi-core overhead is visible because the metric is summed across cores.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=\"server\"}[1m])",
+          "refId": "A",
+          "legendFormat": "cores"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Open File Descriptors",
+      "description": "process_open_fds (current) vs process_max_fds (limit) for the server process. A flat line near max signals connection leak or insufficient ulimit.",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "targets": [
+        {
+          "expr": "process_open_fds{job=\"server\"}",
+          "refId": "A",
+          "legendFormat": "open"
+        },
+        {
+          "expr": "process_max_fds{job=\"server\"}",
+          "refId": "B",
+          "legendFormat": "max"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "GC Pause (quantiles)",
+      "description": "go_gc_duration_seconds — built-in Summary metric reporting GC stop-the-world pauses per Go runtime quantile (0, 0.25, 0.5, 0.75, 1). A growing p99 under steady load signals GC pressure (heap bloat, lots of small allocations).",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "go_gc_duration_seconds{job=\"server\",quantile=\"0.5\"}",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "go_gc_duration_seconds{job=\"server\",quantile=\"0.75\"}",
+          "refId": "B",
+          "legendFormat": "p75"
+        },
+        {
+          "expr": "go_gc_duration_seconds{job=\"server\",quantile=\"1\"}",
+          "refId": "C",
+          "legendFormat": "max"
+        }
+      ]
     }
   ]
 }
