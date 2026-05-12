@@ -17,7 +17,8 @@
       "targets": [
         {
           "expr": "sum by (status) (rate(http_requests_total[5m]))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "status={{status}}"
         }
       ]
     },
@@ -47,14 +48,16 @@
     },
     {
       "id": 3,
-      "type": "gauge",
+      "type": "timeseries",
       "title": "In-Flight Requests",
+      "description": "Concurrent HTTP requests held open by the server. Spikes during load bursts; idles near 0.",
       "datasource": "Prometheus",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
           "expr": "http_in_flight_requests",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "in-flight"
         }
       ]
     },
@@ -62,11 +65,18 @@
       "id": 4,
       "type": "stat",
       "title": "5xx Error Rate",
+      "description": "Fraction of HTTP responses with 5xx status. Defaults to 0 when there is no traffic so the panel never shows 'No data'.",
       "datasource": "Prometheus",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2
+        }
+      },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])) or vector(0)",
           "refId": "A"
         }
       ]

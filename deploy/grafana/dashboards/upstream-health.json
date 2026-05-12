@@ -17,7 +17,8 @@
       "targets": [
         {
           "expr": "sum by (outcome) (rate(rates_provider_requests_total[5m]))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{outcome}}"
         }
       ]
     },
@@ -49,12 +50,14 @@
       "id": 3,
       "type": "gauge",
       "title": "Quota Used by Provider",
+      "description": "TODO: gauge is currently always 0 because the server does not yet parse quota_remaining from upstream responses. Will update once apilayer-quota wiring lands (see roadmap).",
       "datasource": "Prometheus",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
           "expr": "rates_provider_quota_used",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{provider}} ({{period}})"
         }
       ]
     },
@@ -67,7 +70,8 @@
       "targets": [
         {
           "expr": "sum by (kind) (rate(rates_provider_response_anomalies_total[5m]))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{kind}}"
         }
       ]
     }

@@ -17,7 +17,8 @@
       "targets": [
         {
           "expr": "quote_jobs_pending_count",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "pending"
         }
       ]
     },
@@ -30,7 +31,8 @@
       "targets": [
         {
           "expr": "sum by (status) (rate(quote_jobs_total[5m]))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{status}}"
         }
       ]
     },
@@ -43,7 +45,8 @@
       "targets": [
         {
           "expr": "sum by (outcome) (rate(worker_iterations_total[5m]))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{outcome}}"
         }
       ]
     },
@@ -51,12 +54,14 @@
       "id": 4,
       "type": "stat",
       "title": "Scheduler Last Tick (seconds ago)",
+      "description": "TODO: gauge is currently always 0 because the server does not yet set `scheduler_last_tick_seconds_ago` on each tick. Will read correctly once the scheduler-staleness wiring lands (see roadmap).",
       "datasource": "Prometheus",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
           "expr": "scheduler_last_tick_seconds_ago",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "seconds since last tick"
         }
       ]
     },
@@ -69,7 +74,8 @@
       "targets": [
         {
           "expr": "rate(coalescing_collapsed_total[5m])",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "collapsed/s"
         }
       ]
     },
@@ -82,7 +88,8 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum by (le, source) (rate(quote_jobs_completion_seconds_bucket[5m])))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{source}}"
         }
       ]
     }
