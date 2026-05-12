@@ -2,6 +2,12 @@ import http from "k6/http";
 import { check } from "k6";
 import { BASE_URL, PAIRS, JSON_HEADERS, pickRandom } from "./common.js";
 
+// VU pool sizing: at high rates the default of 50/100 starves the executor
+// and k6 reports dropped_iterations. Override with LOADTEST_VUS when running
+// above ~500 RPS; rule of thumb: VUs >= target_rate * expected_p95_seconds * 2.
+const PREALLOCATED_VUS = parseInt(__ENV.LOADTEST_VUS) || 50;
+const MAX_VUS = Math.max(PREALLOCATED_VUS * 2, 100);
+
 export const options = {
   scenarios: {
     mixed_load: {
@@ -9,8 +15,8 @@ export const options = {
       rate: __ENV.LOADTEST_RATE || 50,
       timeUnit: "1s",
       duration: __ENV.LOADTEST_DURATION || "30s",
-      preAllocatedVUs: 50,
-      maxVUs: 100,
+      preAllocatedVUs: PREALLOCATED_VUS,
+      maxVUs: MAX_VUS,
     },
   },
   thresholds: {

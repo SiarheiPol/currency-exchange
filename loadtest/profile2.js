@@ -7,6 +7,11 @@ import http from "k6/http";
 import { check } from "k6";
 import { BASE_URL, PAIRS, pickRandom } from "./common.js";
 
+// See profile1.js for the VU-sizing rationale. Default 100/200 fits ~500 RPS
+// with sub-50ms p95; bump LOADTEST_VUS above 500 RPS.
+const PREALLOCATED_VUS = parseInt(__ENV.LOADTEST_VUS) || 100;
+const MAX_VUS = Math.max(PREALLOCATED_VUS * 2, 200);
+
 export const options = {
   scenarios: {
     read_storm: {
@@ -14,8 +19,8 @@ export const options = {
       rate: __ENV.LOADTEST_RATE || 500,
       timeUnit: "1s",
       duration: __ENV.LOADTEST_DURATION || "30s",
-      preAllocatedVUs: 100,
-      maxVUs: 200,
+      preAllocatedVUs: PREALLOCATED_VUS,
+      maxVUs: MAX_VUS,
     },
   },
   thresholds: {

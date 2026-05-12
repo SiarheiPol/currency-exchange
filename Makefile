@@ -70,6 +70,7 @@ loadtest:
 	docker compose --profile loadtest run --rm \
 		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
 		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
 		k6 run /scripts/profile1.js
 
 loadtest-coalesce:
@@ -80,12 +81,14 @@ loadtest-read:
 	docker compose --profile loadtest run --rm \
 		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
 		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
 		k6 run /scripts/profile2.js
 
 loadtest-burst:
 	docker compose --profile loadtest run --rm \
 		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
 		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
 		k6 run /scripts/profile3.js
 
 loadtest-fail:
@@ -94,4 +97,5 @@ loadtest-fail:
 	docker compose --profile loadtest run --rm \
 		$(if $(LOADTEST_DURATION),-e LOADTEST_DURATION=$(LOADTEST_DURATION)) \
 		$(if $(LOADTEST_RATE),-e LOADTEST_RATE=$(LOADTEST_RATE)) \
+		$(if $(LOADTEST_VUS),-e LOADTEST_VUS=$(LOADTEST_VUS)) \
 		k6 run /scripts/profile5.js

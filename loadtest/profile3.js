@@ -8,6 +8,13 @@ import http from "k6/http";
 import { check } from "k6";
 import { BASE_URL, PAIRS, JSON_HEADERS } from "./common.js";
 
+// See profile1.js for the VU-sizing rationale. Bump LOADTEST_VUS above the
+// default 50/100 when running this profile as a capacity test (e.g.
+// LOADTEST_RATE=20000 LOADTEST_VUS=1000). The previous 100-VU cap was the
+// bottleneck on a 20k-rate run, not the service itself.
+const PREALLOCATED_VUS = parseInt(__ENV.LOADTEST_VUS) || 50;
+const MAX_VUS = Math.max(PREALLOCATED_VUS * 2, 100);
+
 export const options = {
   scenarios: {
     refresh_burst: {
@@ -15,8 +22,8 @@ export const options = {
       rate: __ENV.LOADTEST_RATE || 100,
       timeUnit: "1s",
       duration: __ENV.LOADTEST_DURATION || "30s",
-      preAllocatedVUs: 50,
-      maxVUs: 100,
+      preAllocatedVUs: PREALLOCATED_VUS,
+      maxVUs: MAX_VUS,
     },
   },
   thresholds: {

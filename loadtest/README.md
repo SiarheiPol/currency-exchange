@@ -28,10 +28,34 @@ The k6 container is started on demand under the `loadtest` compose profile and r
 
 ### Running with overrides
 
-Both `LOADTEST_DURATION` and `LOADTEST_RATE` can be overridden via environment variables. All profile targets (1, 2, 3, 5) honour both. Example showing a high-rate extended run for profile 2:
+Three environment variables can be overridden — all profile targets (1, 2, 3, 5) honour them; profile 4 is iteration-count based and ignores them.
+
+| Variable | Default per profile | Purpose |
+|---|---|---|
+| `LOADTEST_DURATION` | `30s` | Total run length. Use `5m`, `120s`, etc. |
+| `LOADTEST_RATE` | profile-specific (50/500/100/25) | Target requests per second. |
+| `LOADTEST_VUS` | profile-specific (50/100/50/50) | k6 virtual-user pool size. `maxVUs` is auto-derived as `LOADTEST_VUS × 2` with a floor at the profile default. |
+
+Example showing a high-rate extended run for profile 2:
 
 ```bash
 LOADTEST_RATE=5000 LOADTEST_DURATION=5m make loadtest-read
+```
+
+#### When to raise `LOADTEST_VUS`
+
+If the k6 summary reports a non-zero `dropped_iterations` counter, k6 ran out of virtual users at the requested rate and the test is **not** an accurate capacity measurement — the service may be able to absorb much more than the reported `http_reqs/s`. Symptom from a sample 20 000 RPS run on `profile3`:
+
+```
+http_reqs.........: 1206682 10054.826599/s
+dropped_iterations: 1193322  9943.502751/s   ← k6 starved
+vus...............: 99      max=100         ← capped at maxVUs
+```
+
+Rule of thumb: `LOADTEST_VUS ≥ target_rate × expected_p95_seconds × 2`. For 20 000 RPS at a ~12 ms p95, set `LOADTEST_VUS=1000`. Each VU costs ~1 MB RAM, so pools up to a few thousand are fine.
+
+```bash
+LOADTEST_RATE=20000 LOADTEST_VUS=1000 LOADTEST_DURATION=120s make loadtest-burst
 ```
 
 ## Profiles

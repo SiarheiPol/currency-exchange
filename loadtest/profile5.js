@@ -17,6 +17,12 @@ import http from "k6/http";
 import { check } from "k6";
 import { BASE_URL, PAIRS, JSON_HEADERS, pickRandom } from "./common.js";
 
+// See profile1.js for the VU-sizing rationale. With injected latency of
+// 500-2000ms, each VU produces ~0.4 RPS; bump LOADTEST_VUS proportionally
+// if you raise LOADTEST_RATE.
+const PREALLOCATED_VUS = parseInt(__ENV.LOADTEST_VUS) || 50;
+const MAX_VUS = Math.max(PREALLOCATED_VUS * 2, 100);
+
 export const options = {
   scenarios: {
     failure_injection: {
@@ -24,8 +30,8 @@ export const options = {
       rate: __ENV.LOADTEST_RATE || 25,
       timeUnit: "1s",
       duration: __ENV.LOADTEST_DURATION || "30s",
-      preAllocatedVUs: 50,
-      maxVUs: 100,
+      preAllocatedVUs: PREALLOCATED_VUS,
+      maxVUs: MAX_VUS,
     },
   },
   thresholds: {
