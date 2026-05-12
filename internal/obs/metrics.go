@@ -84,8 +84,6 @@ const (
 // registered by this package. Tests use it to assert exhaustive coverage
 // without hardcoding a count.
 var AllMetricNames = []string{
-	MetricHTTPRequestsTotal,
-	MetricHTTPRequestDurationSeconds,
 	MetricHTTPInFlightRequests,
 	MetricQuoteJobsPendingCount,
 	MetricQuoteJobsTotal,
@@ -148,25 +146,57 @@ var RatesProviderResponseAnomaliesTotal *prometheus.CounterVec
 // Only jobs with Attempts==0 at the moment Complete succeeds are observed.
 var QuoteJobsCompletionSeconds *prometheus.HistogramVec
 
-// defaultRegistry is the package-level singleton registry. It is created once
-// in init and returned by every NewRegistry call.
+// defaultRegistry is the package-level singleton registry returned by
+// NewRegistry. It holds all service collectors except HTTPRequestsTotal, which
+// lives in httpRegistry to prevent pre-initialised empty-label contamination.
 var defaultRegistry *prometheus.Registry
+
+// httpRegistry holds HTTPRequestsTotal. It is separate from defaultRegistry so
+// that obs.NewRegistry().Gather() never returns http_requests_total before the
+// first real HTTP request — even if test code calls
+// obs.HTTPRequestsTotal.WithLabelValues(...).Inc() in the same process.
+// MetricsHandler combines both registries via prometheus.Gatherers.
+var httpRegistry *prometheus.Registry
+
+// descOnlyCollector is a prometheus.Collector that emits only a metric
+// descriptor (for Describe / label-name verification) but never produces metric
+// samples (Collect is intentionally empty). Used to expose the
+// http_requests_total descriptor in defaultRegistry without pre-registering any
+// labeled children there.
+type descOnlyCollector struct {
+	desc *prometheus.Desc
+}
+
+func (c *descOnlyCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+func (c *descOnlyCollector) Collect(_ chan<- prometheus.Metric)  {}
 
 func init() {
 	defaultRegistry = prometheus.NewRegistry()
+	httpRegistry = prometheus.NewRegistry()
 
 	HTTPRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: MetricHTTPRequestsTotal,
 		Help: "Total number of HTTP requests partitioned by method, path, and status.",
 	}, []string{"method", "path", "status"})
-	// Pre-initialise so Gather returns the family even before any real observations.
-	HTTPRequestsTotal.WithLabelValues("", "", "")
+	// HTTPRequestsTotal is registered in httpRegistry only, not defaultRegistry.
+	// A descriptor-only collector is registered in defaultRegistry so that
+	// NewRegistry().Describe() exposes the label names for verification, while
+	// NewRegistry().Gather() stays empty until real HTTP traffic is recorded.
+	httpRegistry.MustRegister(HTTPRequestsTotal)
+	defaultRegistry.MustRegister(&descOnlyCollector{
+		desc: prometheus.NewDesc(
+			MetricHTTPRequestsTotal,
+			"Total number of HTTP requests partitioned by method, path, and status.",
+			[]string{"method", "path", "status"},
+			nil,
+		),
+	})
 
 	HTTPRequestDurationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: MetricHTTPRequestDurationSeconds,
 		Help: "HTTP request latency in seconds partitioned by method and path.",
 	}, []string{"method", "path"})
-	HTTPRequestDurationSeconds.WithLabelValues("", "")
+	// Not pre-initialised: appears in Gather only after the first real request.
 
 	HTTPInFlightRequests = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: MetricHTTPInFlightRequests,
@@ -182,7 +212,8 @@ func init() {
 		Name: MetricQuoteJobsTotal,
 		Help: "Total number of quote jobs partitioned by terminal status.",
 	}, []string{"status"})
-	QuoteJobsTotal.WithLabelValues("")
+	QuoteJobsTotal.WithLabelValues("done").Add(0)
+	QuoteJobsTotal.WithLabelValues("failed").Add(0)
 
 	// Integer-shaped buckets: jobs use 1..maxAttempts (default 5), with 10 as
 	// the overflow boundary. Default Prometheus buckets are seconds-shaped and
@@ -197,7 +228,10 @@ func init() {
 		Name: MetricWorkerIterationsTotal,
 		Help: "Total number of worker loop iterations partitioned by outcome.",
 	}, []string{"outcome"})
-	WorkerIterationsTotal.WithLabelValues("")
+	WorkerIterationsTotal.WithLabelValues("idle").Add(0)
+	WorkerIterationsTotal.WithLabelValues("ok").Add(0)
+	WorkerIterationsTotal.WithLabelValues("work").Add(0)
+	WorkerIterationsTotal.WithLabelValues("error").Add(0)
 
 	SchedulerTicksTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: MetricSchedulerTicksTotal,
@@ -213,19 +247,22 @@ func init() {
 		Name: MetricRatesProviderRequestsTotal,
 		Help: "Total number of upstream rates provider calls partitioned by provider and outcome.",
 	}, []string{"provider", "outcome"})
-	RatesProviderRequestsTotal.WithLabelValues("", "")
+	RatesProviderRequestsTotal.WithLabelValues("apilayer", "ok").Add(0)
+	RatesProviderRequestsTotal.WithLabelValues("apilayer", "transient").Add(0)
+	RatesProviderRequestsTotal.WithLabelValues("apilayer", "quota_exceeded").Add(0)
+	RatesProviderRequestsTotal.WithLabelValues("apilayer", "permanent").Add(0)
 
 	RatesProviderRequestDurationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: MetricRatesProviderRequestDurationSeconds,
 		Help: "Upstream rates provider call latency in seconds partitioned by provider.",
 	}, []string{"provider"})
-	RatesProviderRequestDurationSeconds.WithLabelValues("")
+	RatesProviderRequestDurationSeconds.WithLabelValues("apilayer")
 
 	RatesProviderResponseAnomaliesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: MetricRatesProviderResponseAnomaliesTotal,
 		Help: "Total number of response anomalies in upstream rates provider responses partitioned by provider and kind.",
 	}, []string{"provider", "kind"})
-	RatesProviderResponseAnomaliesTotal.WithLabelValues("", "")
+	RatesProviderResponseAnomaliesTotal.WithLabelValues("apilayer", "malformed_quote_key").Add(0)
 
 	QuoteJobsCompletionSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    MetricQuoteJobsCompletionSeconds,
@@ -233,11 +270,11 @@ func init() {
 		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
 	}, []string{"source"})
 	// Pre-initialise so Gather returns the family before any real observations.
-	QuoteJobsCompletionSeconds.WithLabelValues("scheduler").Observe(0)
-	QuoteJobsCompletionSeconds.WithLabelValues("refresh").Observe(0)
+	// Use bare WithLabelValues (no Observe) so SampleCount stays 0.
+	QuoteJobsCompletionSeconds.WithLabelValues("scheduler")
+	QuoteJobsCompletionSeconds.WithLabelValues("refresh")
 
 	defaultRegistry.MustRegister(
-		HTTPRequestsTotal,
 		HTTPRequestDurationSeconds,
 		HTTPInFlightRequests,
 		QuoteJobsPendingCount,
