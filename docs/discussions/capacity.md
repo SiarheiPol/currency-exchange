@@ -115,7 +115,7 @@ Defaults from `resilience.md`, repeated here with the rationale:
 
 ### `pgxpool`
 
-Default size: **25 connections per service instance**.
+Default size: **25 connections per service instance**, configurable via `DB_POOL_MAX_CONNS`.
 
 | Trigger | Action |
 |---|---|

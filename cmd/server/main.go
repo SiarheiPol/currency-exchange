@@ -97,16 +97,21 @@ func run() error {
 		slog.Int("batch_size", cfg.BatchSize),
 	)
 
-	pool, err := pgxpool.New(rootCtx, cfg.DBDSN)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DBDSN)
 	if err != nil {
-		return fmt.Errorf("pgxpool.New: %w", err)
+		return fmt.Errorf("pgxpool.ParseConfig: %w", err)
+	}
+	poolCfg.MaxConns = int32(cfg.DBPoolMaxConns)
+	pool, err := pgxpool.NewWithConfig(rootCtx, poolCfg)
+	if err != nil {
+		return fmt.Errorf("pgxpool.NewWithConfig: %w", err)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(rootCtx); err != nil {
 		return fmt.Errorf("postgres ping: %w", err)
 	}
-	obs.Logger(rootCtx).Info(obs.EvPostgresConnected)
+	obs.Logger(rootCtx).Info(obs.EvPostgresConnected, slog.Int("max_conns", cfg.DBPoolMaxConns))
 	obs.MustRegister(obs.NewPgxpoolCollector(&pgxPoolAdapter{pool: pool}))
 
 	clk := clock.New()

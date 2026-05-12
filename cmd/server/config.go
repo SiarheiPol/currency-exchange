@@ -30,6 +30,9 @@ type Config struct {
 
 	// LogLevel is the canonical lowercase slog level. One of: debug, info, warn, error.
 	LogLevel string
+
+	// DBPoolMaxConns is the pgxpool max-connections ceiling. Default: 25.
+	DBPoolMaxConns int
 }
 
 const defaultProviderBaseURL = "https://api.currencylayer.com"
@@ -149,6 +152,20 @@ func Load() (*Config, error) {
 	default:
 		return nil, errors.New("LOG_LEVEL must be one of: debug, info, warn, error")
 	}
+
+	// DB_POOL_MAX_CONNS
+	dbPoolMaxConns := 25
+	if v := os.Getenv("DB_POOL_MAX_CONNS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("DB_POOL_MAX_CONNS: %w", err)
+		}
+		dbPoolMaxConns = n
+	}
+	if dbPoolMaxConns < 1 {
+		return nil, errors.New("DB_POOL_MAX_CONNS must be >= 1")
+	}
+	cfg.DBPoolMaxConns = dbPoolMaxConns
 
 	// Derived fields.
 	cfg.PollInterval = cfg.RefreshMaxLatency - upstreamP99 - dbP99 - slaMargin

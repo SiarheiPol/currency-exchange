@@ -286,3 +286,53 @@ func TestConfig_LogLevel_InvalidValueRejected(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "LOG_LEVEL")
 }
+
+func TestConfig_DBPoolMaxConns_DefaultsTo25(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("DB_POOL_MAX_CONNS", "")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, 25, cfg.DBPoolMaxConns)
+}
+
+func TestConfig_DBPoolMaxConns_ParsesEnvVar(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("DB_POOL_MAX_CONNS", "50")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, 50, cfg.DBPoolMaxConns)
+}
+
+func TestConfig_DBPoolMaxConns_RejectsZero(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("DB_POOL_MAX_CONNS", "0")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "DB_POOL_MAX_CONNS must be >= 1")
+}
+
+func TestConfig_DBPoolMaxConns_RejectsNegative(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("DB_POOL_MAX_CONNS", "-5")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "DB_POOL_MAX_CONNS must be >= 1")
+}
+
+func TestConfig_DBPoolMaxConns_RejectsNonNumeric(t *testing.T) {
+	setValidMinimalEnv(t)
+	t.Setenv("DB_POOL_MAX_CONNS", "abc")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "DB_POOL_MAX_CONNS")
+}

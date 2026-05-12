@@ -116,6 +116,7 @@ All configuration is via environment variables. See `.env.example` for the full 
 |---|---|---|
 | `HTTP_ADDR` | `:8080` | HTTP listen address |
 | `DB_DSN` | (required) | Postgres connection string |
+| `DB_POOL_MAX_CONNS` | `25` | pgxpool max-connections ceiling. Must be >= 1. |
 | `PROVIDER_BASE_URL` | `https://api.currencylayer.com` | Upstream provider URL |
 | `PROVIDER_API_KEY` | (required) | Upstream provider API key |
 | `WHITELIST_CURRENCIES` | `USD,EUR,MXN` | Comma-separated currency whitelist |
