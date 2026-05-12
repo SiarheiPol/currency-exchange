@@ -55,7 +55,7 @@ After either command:
 
 - Service: `http://localhost:8080/healthz`
 - Grafana: `http://localhost:3000` — login `admin/admin`
-  - Dashboards: Service Health, Queue Health, Upstream Health (auto-provisioned)
+  - Dashboards: Service Health, Queue Health, Upstream Health, Database Health (auto-provisioned)
 - Prometheus: `http://localhost:9090` — `Alerts` tab shows the configured rules
 
 Stop the stack:
