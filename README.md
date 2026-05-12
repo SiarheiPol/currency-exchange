@@ -65,6 +65,19 @@ docker compose down       # keep DB volume
 docker compose down -v    # also delete DB and Prometheus data
 ```
 
+### Logs
+
+The service writes structured JSON to stdout; nothing is persisted to a file inside the container. Stream logs via Compose:
+
+```bash
+docker compose logs -f server          # follow the server, Ctrl-C to stop
+docker compose logs --tail=200 server  # last 200 lines, then exit
+docker compose logs                    # all services, scrollable
+docker compose logs -f server fakeprovider postgres   # follow several
+```
+
+Pipe through `jq` for readable output, e.g. `docker compose logs -f server | jq -c '{t:.time, lvl:.level, msg:.msg, req:.request_id}'`. Filter by request id with `docker compose logs server | grep '"request_id":"r-abc"'`.
+
 ### Plain stack (no preset)
 
 If you want defaults without the demo presets:
