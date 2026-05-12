@@ -58,6 +58,18 @@ const (
 	// quota period.
 	MetricRatesProviderQuotaUsed = "rates_provider_quota_used"
 
+	// MetricDBPool* — pgxpool connection-pool state. Registered dynamically via
+	// PgxpoolCollector in cmd/server/main.go after the pool is constructed.
+	MetricDBPoolTotalConns              = "db_pool_total_conns"
+	MetricDBPoolIdleConns               = "db_pool_idle_conns"
+	MetricDBPoolAcquiredConns           = "db_pool_acquired_conns"
+	MetricDBPoolMaxConns                = "db_pool_max_conns"
+	MetricDBPoolAcquiresTotal           = "db_pool_acquires_total"
+	MetricDBPoolAcquireWaitSecondsTotal = "db_pool_acquire_wait_seconds_total"
+	MetricDBPoolEmptyAcquiresTotal      = "db_pool_empty_acquires_total"
+	MetricDBPoolCancelledAcquiresTotal  = "db_pool_cancelled_acquires_total"
+	MetricDBPoolNewConnsTotal           = "db_pool_new_conns_total"
+
 	// MetricRatesProviderResponseAnomaliesTotal counts response anomalies in
 	// upstream rates provider responses, partitioned by provider and anomaly kind.
 	MetricRatesProviderResponseAnomaliesTotal = "rates_provider_response_anomalies_total"
@@ -80,11 +92,9 @@ var AllMetricNames = []string{
 	MetricQuoteJobsAttempts,
 	MetricWorkerIterationsTotal,
 	MetricSchedulerTicksTotal,
-	MetricSchedulerLastTickSecondsAgo,
 	MetricCoalescingCollapsedTotal,
 	MetricRatesProviderRequestsTotal,
 	MetricRatesProviderRequestDurationSeconds,
-	MetricRatesProviderQuotaUsed,
 	MetricRatesProviderResponseAnomaliesTotal,
 	MetricQuoteJobsCompletionSeconds,
 }
@@ -117,10 +127,6 @@ var WorkerIterationsTotal *prometheus.CounterVec
 // SchedulerTicksTotal counts the total number of scheduler ticks fired.
 var SchedulerTicksTotal prometheus.Counter
 
-// SchedulerLastTickSecondsAgo records how many seconds have elapsed since the
-// last scheduler tick.
-var SchedulerLastTickSecondsAgo prometheus.Gauge
-
 // CoalescingCollapsedTotal counts the total number of duplicate requests
 // collapsed by the coalescing layer.
 var CoalescingCollapsedTotal prometheus.Counter
@@ -132,10 +138,6 @@ var RatesProviderRequestsTotal *prometheus.CounterVec
 // RatesProviderRequestDurationSeconds measures upstream rates provider call
 // latency in seconds partitioned by provider name.
 var RatesProviderRequestDurationSeconds *prometheus.HistogramVec
-
-// RatesProviderQuotaUsed tracks the quota consumed per rates provider and
-// quota period.
-var RatesProviderQuotaUsed *prometheus.GaugeVec
 
 // RatesProviderResponseAnomaliesTotal counts response anomalies in upstream
 // rates provider responses partitioned by provider and anomaly kind.
@@ -202,11 +204,6 @@ func init() {
 		Help: "Total number of scheduler ticks fired.",
 	})
 
-	SchedulerLastTickSecondsAgo = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: MetricSchedulerLastTickSecondsAgo,
-		Help: "Seconds elapsed since the last scheduler tick.",
-	})
-
 	CoalescingCollapsedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: MetricCoalescingCollapsedTotal,
 		Help: "Total number of duplicate requests collapsed by the coalescing layer.",
@@ -223,12 +220,6 @@ func init() {
 		Help: "Upstream rates provider call latency in seconds partitioned by provider.",
 	}, []string{"provider"})
 	RatesProviderRequestDurationSeconds.WithLabelValues("")
-
-	RatesProviderQuotaUsed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: MetricRatesProviderQuotaUsed,
-		Help: "Quota consumed per rates provider and period.",
-	}, []string{"provider", "period"})
-	RatesProviderQuotaUsed.WithLabelValues("", "")
 
 	RatesProviderResponseAnomaliesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: MetricRatesProviderResponseAnomaliesTotal,
@@ -254,11 +245,9 @@ func init() {
 		QuoteJobsAttempts,
 		WorkerIterationsTotal,
 		SchedulerTicksTotal,
-		SchedulerLastTickSecondsAgo,
 		CoalescingCollapsedTotal,
 		RatesProviderRequestsTotal,
 		RatesProviderRequestDurationSeconds,
-		RatesProviderQuotaUsed,
 		RatesProviderResponseAnomaliesTotal,
 		QuoteJobsCompletionSeconds,
 	)
@@ -269,8 +258,15 @@ func init() {
 }
 
 // NewRegistry returns the package-level singleton *prometheus.Registry. The
-// registry contains the 15 service collectors plus the standard Go runtime and
-// process collectors, all pre-registered. Callers must not register additional
-// collectors into this registry; use the exported package variables (e.g.
-// obs.HTTPRequestsTotal) to record observations.
+// registry contains the service collectors plus the standard Go runtime and
+// process collectors, all pre-registered.
 func NewRegistry() *prometheus.Registry { return defaultRegistry }
+
+// MustRegister registers one or more collectors into the package-level
+// singleton registry. It panics if any collector fails to register (e.g. name
+// collision). Use this from cmd/server/main.go to wire dynamic collectors such
+// as PgxpoolCollector and NewSchedulerLastTickGaugeFunc after the runtime
+// dependencies (pool, scheduler) are constructed.
+func MustRegister(cs ...prometheus.Collector) {
+	defaultRegistry.MustRegister(cs...)
+}

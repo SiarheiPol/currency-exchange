@@ -145,7 +145,7 @@ Path label is the **route template** (`/quotes/:id`), not the concrete URL — o
 |---|---|---|
 | `rates_provider_requests_total` | counter | `provider`, `outcome` (`ok`, `transient`, `permanent`, `quota_exceeded`) |
 | `rates_provider_request_duration_seconds` | histogram | `provider` |
-| `rates_provider_quota_used` | gauge | `provider`, `period` (`month`) — populated by the rate-limit subsystem. Period `month` is the only billing cycle relevant to apilayer-family plans. |
+| `rates_provider_quota_used` | gauge | `provider`, `period` (`month`) — populated by the rate-limit subsystem (planned — Stage 6). Period `month` is the only billing cycle relevant to apilayer-family plans. |
 
 The quota gauge gives ops an early warning before the upstream returns `quota_exceeded`.
 
@@ -219,7 +219,7 @@ Wireframe, not exact thresholds:
 - p99 HTTP latency above `Z` ms over `Y` minutes.
 - `scheduler_last_tick_seconds_ago` above `2 × T`.
 - `quote_jobs_pending_count` above `whitelist_size × N` (sustained backlog).
-- `rates_provider_quota_used` above 80% of plan limit.
+- `rates_provider_quota_used` above 80% of plan limit (planned — Stage 6 token-bucket layer).
 - `/readyz` failing for more than `M` minutes.
 - `quote_jobs_completion_seconds{source="refresh"}` p99 above `REFRESH_MAX_LATENCY_MS / 1000` (the computed seconds threshold) for 10 minutes (acute SLO breach). The alert threshold is derived from `REFRESH_MAX_LATENCY_MS`; the metric and its buckets remain in seconds per Prometheus convention. Multi-window burn-rate alerts on the same SLI live in the alerting repo — see `SLO and SLI thinking > Job completion SLI`.
 

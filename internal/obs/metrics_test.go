@@ -93,7 +93,6 @@ func TestNewRegistry_LabelNames(t *testing.T) {
 		obs.MetricWorkerIterationsTotal:               {"outcome"},
 		obs.MetricRatesProviderRequestsTotal:          {"outcome", "provider"},
 		obs.MetricRatesProviderRequestDurationSeconds: {"provider"},
-		obs.MetricRatesProviderQuotaUsed:              {"period", "provider"},
 	}
 
 	for metric, wantLabels := range want {

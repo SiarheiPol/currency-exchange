@@ -6,5 +6,5 @@ bin/
 *.exe
 coverage.out
 coverage.html
-.env
+*.env
 .vscode/

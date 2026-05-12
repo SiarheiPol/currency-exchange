@@ -211,7 +211,7 @@ Zero rows returned → `quota_exceeded`. Atomic via Postgres row locking.
 
 A separate periodic task resets the row at the start of each month (or it gets a new row keyed by `(provider, period)`).
 
-The quota gauge `rates_provider_quota_used` is updated from this table on each call.
+The quota gauge `rates_provider_quota_used` is updated from this table on each call (planned — Stage 6).
 
 ### What counts a token
 
@@ -329,7 +329,7 @@ Wireframe — concrete runbooks live in the deployment repo when there is one.
 | Failure | Detection | First response |
 |---|---|---|
 | Upstream unreachable | metric `rates_provider_requests_total{outcome="transient"}` rising | retries continue with backoff; alert if sustained > N minutes |
-| Upstream quota exhausted | `rates_provider_quota_used` ≥ 1.0; `rates_provider_requests_total{outcome="quota_exceeded"}` rising | alert ops; consider tariff upgrade; service returns stale data until next period |
+| Upstream quota exhausted | `rates_provider_quota_used` ≥ 1.0 (planned — Stage 6); `rates_provider_requests_total{outcome="quota_exceeded"}` rising | alert ops; consider tariff upgrade; service returns stale data until next period |
 | DB unreachable | `/readyz` fails | LB removes pod from rotation; ops investigates DB |
 | Workers falling behind | `quote_jobs_pending_count` rising; throughput unchanged | scale `K`; check for upstream slowness |
 | Pod OOM | k8s restarts pod; `up == 0` briefly | investigate memory leak; raise resource limits temporarily |

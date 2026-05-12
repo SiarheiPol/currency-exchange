@@ -71,7 +71,3 @@ groups:
           summary: "Refresh-driven job completion p99 exceeds 2s for 10 minutes"
           description: "POST /quotes/refresh SLA breach. Investigate worker poll interval, upstream latency, DB latency."
 
-      # TODO: UpstreamQuotaHigh — requires rates_provider_quota_limit metric
-      # to compute the 80% ratio. Currently rates_provider_quota_used is a
-      # gauge with no exposed denominator. Add this alert once the limit
-      # metric is wired or as an operator-supplied recording rule.

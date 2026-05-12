@@ -107,6 +107,7 @@ func run() error {
 		return fmt.Errorf("postgres ping: %w", err)
 	}
 	obs.Logger(rootCtx).Info(obs.EvPostgresConnected)
+	obs.MustRegister(obs.NewPgxpoolCollector(&pgxPoolAdapter{pool: pool}))
 
 	clk := clock.New()
 	q := pgqueue.New(pool, clk)
@@ -156,6 +157,7 @@ func run() error {
 		scheduler.WithClock(clk),
 		scheduler.WithIDGen(idgen.New()),
 	)
+	obs.MustRegister(obs.NewSchedulerLastTickGaugeFunc(sched.LastTick, time.Now))
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	schedDone := make(chan struct{})
@@ -287,4 +289,25 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// pgxPoolAdapter wraps *pgxpool.Pool to implement obs.PoolStatProvider, decoupling
+// the obs package from the pgxpool concrete type.
+type pgxPoolAdapter struct {
+	pool *pgxpool.Pool
+}
+
+func (a *pgxPoolAdapter) Stat() obs.PoolStats {
+	s := a.pool.Stat()
+	return obs.PoolStats{
+		TotalConns:           s.TotalConns(),
+		IdleConns:            s.IdleConns(),
+		AcquiredConns:        s.AcquiredConns(),
+		MaxConns:             s.MaxConns(),
+		AcquireCount:         s.AcquireCount(),
+		AcquireWaitDuration:  s.AcquireDuration(),
+		EmptyAcquireCount:    s.EmptyAcquireCount(),
+		CanceledAcquireCount: s.CanceledAcquireCount(),
+		NewConnsCount:        s.NewConnsCount(),
+	}
 }
