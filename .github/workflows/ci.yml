@@ -28,17 +28,6 @@ jobs:
       - name: make check
         run: make check
 
-  test-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: make test-integration
-        run: make test-integration
-
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +42,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### Test coverage (unit)"
+            echo "### Test coverage (unit + integration)"
             echo
             echo '```'
             go tool cover -func=coverage.out | tail -n 20
