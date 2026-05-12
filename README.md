@@ -10,7 +10,12 @@ A REST service that returns current exchange rates between whitelisted currency 
 
 ## API
 
-The OpenAPI spec is at `api/openapi.yaml`. Main endpoints:
+The OpenAPI spec is at `api/openapi.yaml`. While the stack is running you can also browse it interactively:
+
+- Swagger UI: `http://localhost:8080/docs/`
+- Raw spec JSON: `http://localhost:8080/openapi.json`
+
+Main endpoints:
 
 - `GET /quotes/latest?base=USD&quote=EUR` — latest cached quote.
 - `GET /quotes/{id}` — quote by ID.
