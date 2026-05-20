@@ -148,7 +148,7 @@ func TestGenerated_ExpectedTypesExist(t *testing.T) {
 		want := api.JobStatusDone{
 			Base:  "USD",
 			Quote: "EUR",
-			Price: 1.23,
+			Price: "1.23",
 		}
 		var union api.JobStatus
 		if err := union.FromJobStatusDone(want); err != nil {

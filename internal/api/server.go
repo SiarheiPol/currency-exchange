@@ -193,13 +193,12 @@ func renderDone(w http.ResponseWriter, r *http.Request, view queue.JobView) {
 		return
 	}
 	parsedUUID, _ := uuid.Parse(string(view.ID))
-	priceF, _ := view.Price.Float64()
 	body := JobStatusDone{
 		Id:        openapi_types.UUID(parsedUUID),
 		Base:      view.Base,
 		Quote:     view.Quote,
 		Status:    Done,
-		Price:     priceF,
+		Price:     view.Price.String(),
 		UpdatedAt: *view.QuoteUpdatedAt,
 	}
 	var js JobStatus
@@ -263,11 +262,10 @@ func (h *Handlers) GetLatestQuote(w http.ResponseWriter, r *http.Request, params
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	priceF, _ := quote.Price.Float64()
 	body := LatestQuote{
 		Base:      params.Base,
 		Quote:     params.Quote,
-		Price:     priceF,
+		Price:     quote.Price.String(),
 		UpdatedAt: quote.FetchedAt,
 	}
 	w.Header().Set("Content-Type", "application/json")

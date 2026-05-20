@@ -337,8 +337,9 @@ components:
           enum:
             - done
         price:
-          type: number
-          format: double
+          type: string
+          description: "Exchange rate as a decimal string (e.g. \"1.234567\"). Full precision — no floating-point rounding."
+          example: "1.234567"
         updated_at:
           type: string
           format: date-time
@@ -385,9 +386,9 @@ components:
           type: string
           example: MXN
         price:
-          type: number
-          format: double
-          example: 20.255648
+          type: string
+          description: "Exchange rate as a decimal string (e.g. \"1.234567\"). Full precision — no floating-point rounding."
+          example: "20.255648"
         updated_at:
           type: string
           format: date-time

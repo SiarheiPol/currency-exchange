@@ -655,7 +655,7 @@ func TestGetQuoteJob_RealHandler_Done(t *testing.T) {
 	done, err := js.AsJobStatusDone()
 	require.NoError(t, err)
 	assert.Equal(t, api.JobStatusDoneStatus("done"), done.Status)
-	assert.InDelta(t, 1.234567, done.Price, 1e-6, "price must match within delta")
+	assert.Equal(t, "1.234567", done.Price, "price must match exactly")
 }
 
 // TestGetQuoteJob_RealHandler_Failed asserts that a failed job returns 200 with
@@ -968,8 +968,7 @@ func TestGetLatestQuote_Found(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, "EUR", body.Base)
 	assert.Equal(t, "MXN", body.Quote)
-	priceF, _ := wantPrice.Float64()
-	assert.InDelta(t, priceF, body.Price, 1e-6)
+	assert.Equal(t, wantPrice.String(), body.Price)
 	assert.WithinDuration(t, testLatestEpoch, body.UpdatedAt, time.Second)
 }
 
